@@ -3,3 +3,6 @@ sdk
 prefix
 prefix64
 *.tgz
+scripts/ffmpeg.sh
+logs/
+out/

@@ -3,6 +3,7 @@
 cd "$( dirname "${BASH_SOURCE[0]}" )"
 . ./include/depinfo.sh
 
+export BUILD_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cleanbuild=0
 nodeps=0
 target=mpv
@@ -80,6 +81,7 @@ setup_prefix () {
 buildtype = 'release'
 default_library = 'static'
 wrap_mode = 'nodownload'
+prefix = '/usr/local'
 [binaries]
 c = '$CC'
 cpp = '$CXX'
@@ -111,8 +113,10 @@ build () {
 
 	printf >&2 '\e[1;34m%s\e[m\n' "Building $1..."
 	pushd deps/$1
-	BUILDSCRIPT=../../scripts/$1.sh
- 	sudo chmod +x $BUILDSCRIPT
+	# Absolute, not ../../: deps/mpv is a symlink to the plynic-mpv fork, and a
+	# relative path is resolved against the symlink's physical location.
+	BUILDSCRIPT="$BUILD_ROOT/scripts/$1.sh"
+	chmod +x $BUILDSCRIPT
 	[ $cleanbuild -eq 1 ] && $BUILDSCRIPT clean
     $BUILDSCRIPT build
     popd
