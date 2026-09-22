@@ -17,7 +17,7 @@ v_ffmpeg=6.0
 # plynic-mpv fork: upstream 78d43740f5 + the plynic patch stack (default
 # branch plynic/78d43740f5 of the repo below). Pin the fork's commit, not the
 # branch, so a rebuilt tag is bit-for-bit the same engine.
-v_mpv=5e6d29048c2cd711010da1ed5bb851d34a1f2c3b
+v_mpv=b892b06dc379d8a2824fb9e837a66feddaf5bce0
 v_mpv_repo=https://github.com/linrong123/plynic-mpv.git
 v_libogg=1.3.5
 v_libvorbis=1.3.7
