@@ -1,0 +1,61 @@
+name: plynic flavor
+
+# The plynic app consumes ONLY what this workflow publishes: a tag
+# `v<media-kit base>-plynic.<n>` builds every ABI of the plynic flavor and
+# attaches plynic-<abi>.jar, manifest.json and debug-symbols-plynic.zip to a
+# GitHub release of that tag. tool/native_libs.lock.json in the app is then
+# filled from manifest.json (tool/fetch_native_libs.sh --update).
+
+on:
+  push:
+    tags:
+      - 'v*-plynic.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build plynic flavor (4 ABIs)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends autoconf automake libtool gettext autopoint zip unzip
+      - name: Symlink SDK
+        working-directory: ./buildscripts
+        run: |
+          mkdir sdk
+          ln -s ${ANDROID_HOME} ./sdk/android-sdk-linux
+      - name: Bundle (plynic)
+        working-directory: ./buildscripts
+        env:
+          PLYNIC_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: ./bundle_plynic.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plynic-flavor
+          path: ./buildscripts/artifacts/plynic/**
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            buildscripts/artifacts/plynic/plynic-*.jar
+            buildscripts/artifacts/plynic/manifest.json
+            buildscripts/artifacts/plynic/debug-symbols-plynic.zip
