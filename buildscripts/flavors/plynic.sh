@@ -1,6 +1,8 @@
 #!/bin/bash -e
 #
-# plynic flavor = media-kit's `full` minus `--disable-swscale-alpha`.
+# plynic flavor = media-kit's `full` minus `--disable-swscale-alpha`, plus the
+# spdif muxer (bitstream passthrough groundwork; a muxer, so it costs nothing
+# until `ao` asks for it).
 #
 # mpv's software OSD path (sub/draw_bmp.c, used by vo_mediacodec_osd) scales
 # BGRA subtitle bitmaps with libswscale whenever the OSD surface is not the
@@ -120,6 +122,8 @@ cpuflags=
 	--enable-protocol=tcp \
 	--enable-protocol=tls \
 	--enable-protocol=srt \
+	\
+	--enable-muxer=spdif \
 	\
 	--enable-encoder=mjpeg \
 	--enable-encoder=ljpeg \

@@ -6,15 +6,19 @@ v_sdk=9123335_latest
 v_ndk=25.2.9519653
 v_sdk_build_tools=33.0.2
 
-v_libass=0.17.1
-v_harfbuzz=7.2.0
-v_fribidi=1.0.12
-v_freetype=2-13-0
+v_libass=0.17.5
+v_harfbuzz=11.5.1
+v_fribidi=1.0.17
+v_freetype=2-13-3
 v_mbedtls=3.4.0
 v_dav1d=1.2.0
-v_libxml2=2.10.3
+v_libxml2=2.14.6
 v_ffmpeg=6.0
-v_mpv=78d43740f52db817d98bcf24fb30a76ab6fa13ff
+# plynic-mpv fork: upstream 78d43740f5 + the plynic patch stack (default
+# branch plynic/78d43740f5 of the repo below). Pin the fork's commit, not the
+# branch, so a rebuilt tag is bit-for-bit the same engine.
+v_mpv=5e6d29048c2cd711010da1ed5bb851d34a1f2c3b
+v_mpv_repo=https://github.com/linrong123/plynic-mpv.git
 v_libogg=1.3.5
 v_libvorbis=1.3.7
 v_libvpx=1.13
