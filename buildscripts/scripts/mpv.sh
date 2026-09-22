@@ -18,6 +18,13 @@ fi
 
 unset CC CXX # meson wants these unset
 
+# $LDFLAGS is repeated on purpose: a c_link_args given on the command line
+# REPLACES the one meson would have taken from the environment, and build.sh's
+# LDFLAGS is where `-z max-page-size=16384` lives. Without it libmpv.so came
+# out with 4 KiB PT_LOAD alignment — the app's verify_native_libs.sh --apk
+# refused the first release for exactly that (16 KiB-page Android 15 devices
+# would not load it).
+#
 # --build-id: the official libmpv.so carries no GNU build-id note, so a native
 # crash inside the engine reports `libmpv.so+0x<pc>` with nothing to say WHICH
 # libmpv.so that was. plynic's crash records and its `abnormal_exit` telemetry
@@ -37,7 +44,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
    	-Dlibplacebo=disabled \
  	-Dmanpage-build=disabled \
 	-Dbuild-date=false \
-	-Dc_link_args='-Wl,--build-id=sha1'
+	-Dc_link_args="$LDFLAGS -Wl,--build-id=sha1"
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install
