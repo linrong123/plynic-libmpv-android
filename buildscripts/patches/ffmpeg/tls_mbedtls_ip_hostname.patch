@@ -1,0 +1,19 @@
+diff --git a/libavformat/tls_mbedtls.c b/libavformat/tls_mbedtls.c
+index 8503523..6375825 100644
+--- a/libavformat/tls_mbedtls.c
++++ b/libavformat/tls_mbedtls.c
+@@ -248,7 +248,13 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
+         goto fail;
+     }
+ 
+-    if (!shr->listen && !shr->numerichost) {
++    // An IP address is set as well when verifying: mbedtls 3.5+ matches it
++    // against the certificate's iPAddress subjectAltNames, and 3.6.3+ fails
++    // the handshake of a verifying client that has set no hostname. It also
++    // ends up in the SNI extension, where RFC 6066 does not allow addresses,
++    // so it is still left out when not verifying.
++    if (!shr->listen && (!shr->numerichost ||
++                         (shr->verify && MBEDTLS_VERSION_NUMBER >= 0x03050000))) {
+         if ((ret = mbedtls_ssl_set_hostname(&tls_ctx->ssl_context, shr->host)) != 0) {
+             av_log(h, AV_LOG_ERROR, "mbedtls_ssl_set_hostname returned %d\n", ret);
+             goto fail;

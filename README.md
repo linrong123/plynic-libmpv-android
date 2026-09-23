@@ -12,6 +12,9 @@ What differs from upstream:
   commit (`buildscripts/include/depinfo.sh`: `v_mpv`, `v_mpv_repo`): upstream
   78d43740f5 plus a small patch stack (an Android VO that draws OSD/subtitles
   into a second Surface, a JavaVM hook).
+- **FFmpeg TLS patches** (`buildscripts/patches/ffmpeg/tls_mbedtls_*.patch`):
+  with `tls_verify=1`, a host given as an IP address is checked against the
+  certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`).
 - **`--build-id=sha1`** on libmpv.so, so a native crash can be attributed to a
   build and symbolized against the release's `debug-symbols-plynic.zip`.
 - **Subtitle charset detection**: mpv is built with iconv (GNU libiconv) and
@@ -61,6 +64,13 @@ mpv are published under mpv's terms in the plynic-mpv repository.
   TLS 1.3 hosts. `/dev/urandom` keeps what 3.4.0 read (3.6.6 switched the
   default to `/dev/random`, which blocks on kernels before 5.6); threading
   support makes the PSA key store safe for mpv's concurrent connections.
+- **FFmpeg: `https://<IP>` with `tls_verify=1`** — FFmpeg 6.0 never set a
+  hostname for an IP-address host, and since 3.6.3 mbedtls fails the
+  handshake of a verifying client without one (`-0x5d80`), so every such URL
+  failed. The address is now set when verifying, and mbedtls (3.5+) matches it
+  against the certificate's iPAddress subjectAltNames; without `tls_verify`
+  nothing changes (no SNI for addresses, no name check). The mbedtls bump and
+  this patch have to ship together.
 - **libass**: assembly enabled (was `--disable-asm` for every ABI), and it is
   now compiled with `-O2` — `CFLAGS=-fPIC` given to configure had replaced
   autoconf's `-g -O2`, so libass was built without optimisation.
