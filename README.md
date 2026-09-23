@@ -14,7 +14,9 @@ What differs from upstream:
   into a second Surface, a JavaVM hook).
 - **FFmpeg TLS patches** (`buildscripts/patches/ffmpeg/tls_mbedtls_*.patch`):
   with `tls_verify=1`, a host given as an IP address is checked against the
-  certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`).
+  certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`);
+  a CA file in which some certificates cannot be parsed is used with the
+  others and a warning instead of failing (`tls_mbedtls_ca_partial.patch`).
 - **`--build-id=sha1`** on libmpv.so, so a native crash can be attributed to a
   build and symbolized against the release's `debug-symbols-plynic.zip`.
 - **Subtitle charset detection**: mpv is built with iconv (GNU libiconv) and
@@ -71,6 +73,13 @@ mpv are published under mpv's terms in the plynic-mpv repository.
   against the certificate's iPAddress subjectAltNames; without `tls_verify`
   nothing changes (no SNI for addresses, no name check). The mbedtls bump and
   this patch have to ship together.
+- **FFmpeg: a CA file with certificates mbedtls can't parse** (e.g. SM2 roots
+  in some OEM trust stores) failed every verified connection:
+  `mbedtls_x509_crt_parse_file()` returns how many it skipped, and FFmpeg took
+  any non-zero value as an error. Now the others are used and FFmpeg warns
+  `Skipped N certificate(s) of the CA file that could not be parsed, M loaded`.
+  Only an error (< 0) or no certificate at all still fails, with the same
+  `mbedtls_x509_crt_parse_file for CA cert returned …` line as before.
 - **libass**: assembly enabled (was `--disable-asm` for every ABI), and it is
   now compiled with `-O2` — `CFLAGS=-fPIC` given to configure had replaced
   autoconf's `-g -O2`, so libass was built without optimisation.
