@@ -11,7 +11,7 @@ What differs from upstream:
 - **mpv from [plynic-mpv](https://github.com/linrong123/plynic-mpv)** at a pinned
   commit (`buildscripts/include/depinfo.sh`: `v_mpv`, `v_mpv_repo`): upstream
   78d43740f5 plus a small patch stack (an Android VO that draws OSD/subtitles
-  into a second Surface, a JavaVM hook).
+  into a second Surface, a JavaVM hook, `ao_audiotrack` fixes).
 - **FFmpeg TLS patches** (`buildscripts/patches/ffmpeg/tls_mbedtls_*.patch`):
   with `tls_verify=1`, a host given as an IP address is checked against the
   certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`);
@@ -55,6 +55,22 @@ mpv are published under mpv's terms in the plynic-mpv repository.
 
 ### v1.1.11-plynic.6
 
+- **mpv: plynic-mpv `dfd3a72` → `4338bc6`, the `ao_audiotrack` series**
+  (details in the plynic-mpv README):
+  - backport of upstream `46fe3cded0`: the AudioTrack JNI state is
+    reference-counted, so destroying one of two mpv instances no longer
+    crashes the other;
+  - a direct or offloaded track (multichannel PCM, passthrough over HDMI)
+    that dies on a route change is reloaded instead of being recreated and
+    never started (silence, video frozen until a seek); beyond 3 reloads in
+    30 s each further one backs off (1 s doubling up to 30 s);
+  - no busy loop while there is nothing to write (underrun, EOF);
+  - the delay no longer counts the track buffer twice before the first
+    timestamp after start/seek/resume; timestamps are extrapolated in
+    `CLOCK_MONOTONIC` and re-synced after a route change (speaker ↔
+    Bluetooth used to leave up to 3 s of A/V offset);
+  - a failed `init()` releases everything (two early returns kept the JNI
+    use count up).
 - **dav1d 1.2.0 → 1.5.4**: fixes CVE-2024-1580 (integer overflow, fixed in
   1.4.0). FFmpeg 6.0's libdav1d wrapper still configures (`dav1d >= 0.5.0`).
 - **mbedtls 3.4.0 → 3.6.7** (3.6 LTS, supported until at least March 2027):
@@ -89,6 +105,11 @@ mpv are published under mpv's terms in the plynic-mpv repository.
   -Duchardet=enabled` for mpv. Cost on arm64 (stripped libmpv.so): libiconv
   ≈ 0.9 MB, uchardet ≈ 0.18 MB. libmpv.so now has `DT_NEEDED libstdc++.so`
   (uchardet's operator new/delete) and is linked with `--no-undefined`.
+  `libstdc++.so` is a public platform library on every API level; the
+  imports carry the NDK stubs' `LIBC_O` version, which a pre-O device's
+  unversioned `libstdc++.so` satisfies as a global symbol. Checked on an
+  Android 7.0 (API 24) arm64 emulator: `dlopen(RTLD_NOW)` succeeds without
+  linker warnings and `mpv_create()` works.
 - Stripped libmpv.so, plynic.5 → plynic.6 (local build): arm64 16.32 → 17.10 MB,
   armeabi-v7a 15.52 → 16.31 MB, x86_64 20.04 → 20.97 MB, x86 17.12 → 17.85 MB.
   Without libiconv/uchardet the other changes together make arm64 0.34 MB
