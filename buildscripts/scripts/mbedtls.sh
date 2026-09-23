@@ -42,5 +42,18 @@ python3 scripts/config.py set MBEDTLS_THREADING_PTHREAD
 
 # CFLAGS given on the command line replace the Makefiles' own `CFLAGS ?= -O2`,
 # so the optimisation level has to be spelled out here (3.4.0 was built -O0).
-make CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC" -j$cores no_test
-make CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC" DESTDIR="$prefix_dir" install
+#
+# Only the three static libraries are built and installed. `make install`
+# depends on `no_test`, which also builds and links the sample programs, and
+# with MBEDTLS_THREADING_PTHREAD set scripts/common.make links those with
+# -lpthread, which the NDK does not have (pthreads are in bionic's libc):
+# the build then fails on GNU make 4 (CI). macOS's make 3.81 never ran that
+# auto-detection, so local builds did not notice. The library Makefile does
+# not look at THREADING, so the .a files are the same either way.
+make CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC" -j$cores lib
+
+# What `make install` put in place, minus the programs (bin/).
+mkdir -p "$prefix_dir/include" "$prefix_dir/lib"
+rm -rf "$prefix_dir/include/mbedtls" "$prefix_dir/include/psa"
+cp -Rp include/mbedtls include/psa "$prefix_dir/include/"
+cp -p library/libmbedtls.a library/libmbedx509.a library/libmbedcrypto.a "$prefix_dir/lib/"
