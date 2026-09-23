@@ -103,6 +103,24 @@ each release's `manifest.json` under `deps`.
 The build scripts themselves are MIT (see `LICENSE`). The plynic patches to
 mpv are published under mpv's terms in the plynic-mpv repository.
 
+### Unreleased
+
+- **mpv: plynic-mpv `4338bc6` → `ed162a9`** (details in the plynic-mpv README):
+  - mpv's clock is `CLOCK_MONOTONIC` on Android. It was
+    `CLOCK_MONOTONIC_RAW`, which on an arm64 3.18 kernel (the Android 7.0
+    emulator) jumps by ±453 s between calls: libmpv aborted in
+    `mp_time_us_add()` (`time_us > 0`) as soon as a file was opened, so the
+    app could not play at all there.
+  - pause keeps the audio: `ao_audiotrack` pauses the AudioTrack instead of
+    pausing and flushing it (backports of upstream `93a924a553` and
+    `4d03efb4b0` let the core do that for pull AOs). Each pause used to
+    throw away the 80–150 ms in the track, so the audio clock (and video with
+    it) jumped ahead by that on resume, with underrun warnings.
+- **FFmpeg: why a certificate was rejected** — with `tls_verify=1` a failed
+  verification now logs `tls_mbedtls: certificate verify failed: flags=0x…
+  (…)` before the unchanged `mbedtls_ssl_handshake returned -0x2700` (format
+  under "Log lines for embedders").
+
 ### v1.1.11-plynic.6
 
 - **mpv: plynic-mpv `dfd3a72` → `4338bc6`, the `ao_audiotrack` series**
