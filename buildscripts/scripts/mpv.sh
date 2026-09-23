@@ -31,6 +31,34 @@ unset CC CXX # meson wants these unset
 # both key on the BuildId of the top frame; without the note every engine
 # crash is unattributable to a build, and unsymbolizable once a second build
 # exists. sha1 (not the default fast hash) so it is stable across linkers.
+#
+# iconv + uchardet: sub-codepage=auto (misc/charset_conv.c) guesses the
+# charset of a non-UTF-8 external subtitle and converts it; without them a
+# GBK/Big5/Shift_JIS .srt/.ass came out as Latin-1 mojibake. Both are static
+# libraries in the prefix (scripts/libiconv.sh, scripts/uchardet.sh).
+# meson's dependency('iconv') has no pkg-config method: it links a test
+# calling iconv_open() with c_args/c_link_args ("builtin"), else looks for
+# libiconv in the compiler's own search dirs, which never include the prefix.
+# So the prefix's GNU iconv.h goes first on the include path (it maps
+# iconv_open to libiconv_open; bionic's header only declares iconv for API
+# 28+) and -liconv joins the link args, which puts it after mpv's objects on
+# the final link. "enabled", not "auto": a missing library fails the build
+# instead of silently shipping the mojibake again.
+# --exclude-libs keeps the two archives' symbols out of libmpv.so's dynamic
+# symbol table; nothing outside libmpv calls them.
+#
+# --no-undefined: mpv's meson.build sets b_lundef=false, so a symbol nothing
+# on the link line defines used to become a silent dynamic import. On Android
+# such a libmpv.so does not load at all ("cannot locate symbol"). The first
+# uchardet link did exactly that (async_safe_fatal_no_abort, from the NDK's
+# static libstdc++.a; see scripts/uchardet.sh). Every import now has to
+# resolve against the API-level stubs of the NEEDED libraries at link time.
+for f in lib/libiconv.a include/iconv.h lib/pkgconfig/uchardet.pc; do
+	[ -e "$prefix_dir/$f" ] && continue
+	echo "mpv: $prefix_dir/$f is missing; build libiconv and uchardet first" \
+		"(plynic-build.sh without --mpv-only, or --only libiconv,uchardet)" >&2
+	exit 1
+done
 
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	--prefer-static \
@@ -39,12 +67,14 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	-Dlibmpv=true \
  	-Dlua=disabled \
  	-Dcplayer=false \
-	-Diconv=disabled \
+	-Diconv=enabled \
+	-Duchardet=enabled \
 	-Dvulkan=disabled \
    	-Dlibplacebo=disabled \
  	-Dmanpage-build=disabled \
 	-Dbuild-date=false \
-	-Dc_link_args="$LDFLAGS -Wl,--build-id=sha1"
+	-Dc_args="-I$prefix_dir/include" \
+	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a -Wl,--no-undefined -Wl,--build-id=sha1"
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install

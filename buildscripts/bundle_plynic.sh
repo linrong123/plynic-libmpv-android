@@ -55,15 +55,18 @@ popd
 cp deps/media-kit-android-helper/app/build/outputs/apk/release/plynic-*.jar artifacts/plynic/
 
 # manifest.json: the numbers the app's lock file pins.
-python3 - "$v_mpv" "$v_mpv_repo" "$v_ndk" "$v_ffmpeg" "$v_libass" "$v_harfbuzz" "$v_freetype" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$ndk_bin" "${abis[@]}" <<'PY'
+# Every library linked into libmpv.so, with the version depinfo.sh pins; the
+# app copies this "deps" object into tool/native_libs.lock.json verbatim.
+python3 - "$v_mpv" "$v_mpv_repo" "$v_ndk" "$v_ffmpeg" "$v_libass" "$v_harfbuzz" "$v_freetype" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet" "$ndk_bin" "${abis[@]}" <<'PY'
 import hashlib, json, os, subprocess, sys, zipfile
-mpv, mpv_repo, ndk, ffmpeg, libass, harfbuzz, freetype, fribidi, libxml2, mbedtls, dav1d, ndk_bin = sys.argv[1:13]
-abis = sys.argv[13:]
+mpv, mpv_repo, ndk, ffmpeg, libass, harfbuzz, freetype, fribidi, libxml2, mbedtls, dav1d, libiconv, uchardet, ndk_bin = sys.argv[1:15]
+abis = sys.argv[15:]
 def digests(data):
     return {"md5": hashlib.md5(data).hexdigest(), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
 out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""), "mpv_commit": mpv, "mpv_repo": mpv_repo, "ndk": ndk,
        "deps": {"ffmpeg": ffmpeg, "libass": libass, "harfbuzz": harfbuzz, "freetype": freetype.replace("-", "."),
-                "fribidi": fribidi, "libxml2": libxml2, "mbedtls": mbedtls, "dav1d": dav1d},
+                "fribidi": fribidi, "libxml2": libxml2, "mbedtls": mbedtls, "dav1d": dav1d,
+                "libiconv": libiconv, "uchardet": uchardet},
        "jar_entry_prefix": "lib/{abi}/", "abis": {}}
 for abi in abis:
     jar_path = f"artifacts/plynic/plynic-{abi}.jar"

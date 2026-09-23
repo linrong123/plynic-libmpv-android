@@ -17,8 +17,10 @@ fi
 mkdir -p _build$ndk_suffix
 cd _build$ndk_suffix
 
+# -O2 is spelled out: a CFLAGS given to configure replaces autoconf's default
+# "-g -O2", and with just -fPIC libxml2 was compiled without optimisation.
 ../configure \
-    CFLAGS=-fPIC CXXFLAGS=-fPIC \
+    CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC" \
 	--host=$ndk_triple \
     --disable-shared \
     --enable-static \

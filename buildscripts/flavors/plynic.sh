@@ -12,6 +12,13 @@
 # turns solid black and semi-transparent fills turn solid. Seen on a phone
 # (1080-wide OSD surface, 1920-wide PGS); invisible on a 1080p TV emulator,
 # where nothing is scaled. Costs a few KB.
+#
+# --disable-iconv stays although libiconv is now in the prefix: subtitle
+# charsets are mpv's job (demux_lavf.c converts external text subtitles with
+# uchardet + libiconv before libavformat parses them; see scripts/mpv.sh).
+# FFmpeg would only use iconv for AVCodecContext.sub_charenc, which mpv turns
+# off (sub/lavc_conv.c: FF_SUB_CHARENC_MODE_IGNORE), and for DVB service
+# names in MPEG-TS program metadata, which mpv does not expose.
 
 . ../../include/depinfo.sh
 . ../../include/path.sh
