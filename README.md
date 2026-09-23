@@ -16,7 +16,9 @@ What differs from upstream:
   with `tls_verify=1`, a host given as an IP address is checked against the
   certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`);
   a CA file in which some certificates cannot be parsed is used with the
-  others and a warning instead of failing (`tls_mbedtls_ca_partial.patch`).
+  others and a warning instead of failing (`tls_mbedtls_ca_partial.patch`);
+  a rejected server certificate is logged with the reasons
+  (`tls_mbedtls_verify_flags.patch`, format below).
 - **`--build-id=sha1`** on libmpv.so, so a native crash can be attributed to a
   build and symbolized against the release's `debug-symbols-plynic.zip`.
 - **Subtitle charset detection**: mpv is built with iconv (GNU libiconv) and
@@ -29,6 +31,54 @@ What differs from upstream:
 - CI (`.github/workflows/plynic.yaml`): a tag `v<base>-plynic.<n>` builds the
   four ABIs and attaches `plynic-<abi>.jar`, `manifest.json` (digests, sizes,
   build-ids, dependency versions) and `debug-symbols-plynic.zip` to the release.
+
+## Log lines for embedders
+
+FFmpeg's `tls_mbedtls` messages that an embedder may parse. Through libmpv
+they arrive as log messages with prefix `ffmpeg`; the text starts with the
+URL protocol's name, `tls: ` (also for the TLS connection under an
+`https://` URL or an HLS segment).
+
+**Server certificate rejected** (`tls_verify=1`), two `error` lines, in this
+order:
+
+```
+tls: tls_mbedtls: certificate verify failed: flags=0x5 (BADCERT_EXPIRED|BADCERT_CN_MISMATCH)
+tls: mbedtls_ssl_handshake returned -0x2700
+```
+
+- The second line is FFmpeg's own and unchanged
+  (`MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`); a parser that only knows it keeps
+  working.
+- `flags` is `mbedtls_ssl_get_verify_result()` in lowercase hex, no padding.
+  Regular expression for the first line:
+  `^tls: tls_mbedtls: certificate verify failed: flags=0x([0-9a-f]+) \(([A-Z0-9_|]*)\)$`
+- In the parentheses: the name of each set flag, as mbedtls names it
+  (`MBEDTLS_X509_CRT_ERROR_INFO_LIST`, the table
+  `mbedtls_x509_crt_verify_info()` prints from) without the `MBEDTLS_X509_`
+  prefix, joined by `|`, in that table's order (increasing bit value in
+  mbedtls 3.6). Bits without a name are only in `flags`, so the list may be
+  empty. The names a player will see:
+
+  | Name | Bit | Meaning |
+  |---|---|---|
+  | `BADCERT_EXPIRED` | `0x1` | validity has ended (or the device clock is ahead) |
+  | `BADCERT_FUTURE` | `0x200` | validity has not started (or the device clock is behind) |
+  | `BADCERT_CN_MISMATCH` | `0x4` | the host (name or IP address) is not in the certificate |
+  | `BADCERT_NOT_TRUSTED` | `0x8` | no chain to a CA of `ca_file` (untrusted issuer, missing intermediate, self-signed) |
+  | `BADCERT_KEY_USAGE`, `BADCERT_EXT_KEY_USAGE`, `BADCERT_NS_CERT_TYPE` | `0x800`, `0x1000`, `0x2000` | not a TLS server certificate |
+  | `BADCERT_BAD_MD`, `BADCERT_BAD_PK`, `BADCERT_BAD_KEY` | `0x4000`, `0x8000`, `0x10000` | signed with a hash, algorithm or key size mbedtls does not accept |
+
+  The others do not occur here: `BADCERT_REVOKED` and `BADCRL_*` need CRLs,
+  `BADCERT_MISSING`, `BADCERT_SKIP_VERIFY` and `BADCERT_OTHER` client
+  certificates or a verify callback, none of which FFmpeg sets up.
+- Several reasons can be set at once (above: expired and for another host).
+  Checked against mbedtls 3.6.7 over TLS 1.3 and TLS 1.2.
+
+**CA file**: `tls: mbedtls_x509_crt_parse_file for CA cert returned <n>`
+(`error`: `n` < 0, or not a single certificate could be parsed) and
+`tls: Skipped <n> certificate(s) of the CA file that could not be parsed,
+<m> loaded` (`warning`), see `tls_mbedtls_ca_partial.patch`.
 
 ## Dependencies
 

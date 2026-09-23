@@ -1,0 +1,47 @@
+diff --git a/libavformat/tls_mbedtls.c b/libavformat/tls_mbedtls.c
+--- a/libavformat/tls_mbedtls.c
++++ b/libavformat/tls_mbedtls.c
+@@ -31,6 +31,7 @@
+ #include "internal.h"
+ #include "url.h"
+ #include "tls.h"
++#include "libavutil/bprint.h"
+ #include "libavutil/parseutils.h"
+ 
+ typedef struct TLSContext {
+@@ -153,6 +154,26 @@
+     }
+ }
+ 
++// Why the peer's certificate was rejected, as one line for programs to
++// parse: the flags, and the names mbedtls gives them (from the table
++// mbedtls_x509_crt_verify_info() prints) without the MBEDTLS_X509_ prefix.
++static void log_verify_failure(URLContext *h)
++{
++    TLSContext *tls_ctx = h->priv_data;
++    uint32_t flags = mbedtls_ssl_get_verify_result(&tls_ctx->ssl_context);
++    AVBPrint names;
++
++    av_bprint_init(&names, 0, AV_BPRINT_SIZE_AUTOMATIC);
++#define X509_CRT_ERROR_INFO(code, name, info)                                  \
++    if (flags & (code))                                                        \
++        av_bprintf(&names, "%s%s", names.len ? "|" : "", (name) + strlen("MBEDTLS_X509_"));
++    MBEDTLS_X509_CRT_ERROR_INFO_LIST
++#undef X509_CRT_ERROR_INFO
++    av_log(h, AV_LOG_ERROR, "tls_mbedtls: certificate verify failed: flags=0x%x (%s)\n",
++           flags, names.str);
++    av_bprint_finalize(&names, NULL);
++}
++
+ static void parse_options(TLSContext *tls_ctxc, const char *uri)
+ {
+     char buf[1024];
+@@ -280,6 +301,8 @@
+     // ssl handshake
+     while ((ret = mbedtls_ssl_handshake(&tls_ctx->ssl_context)) != 0) {
+         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
++            if (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)
++                log_verify_failure(h);
+             handle_handshake_error(h, ret);
+             goto fail;
+         }
