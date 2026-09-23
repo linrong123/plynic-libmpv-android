@@ -103,23 +103,52 @@ each release's `manifest.json` under `deps`.
 The build scripts themselves are MIT (see `LICENSE`). The plynic patches to
 mpv are published under mpv's terms in the plynic-mpv repository.
 
-### Unreleased
+### v1.1.11-plynic.7
 
 - **mpv: plynic-mpv `4338bc6` → `ed162a9`** (details in the plynic-mpv README):
-  - mpv's clock is `CLOCK_MONOTONIC` on Android. It was
-    `CLOCK_MONOTONIC_RAW`, which on an arm64 3.18 kernel (the Android 7.0
-    emulator) jumps by ±453 s between calls: libmpv aborted in
-    `mp_time_us_add()` (`time_us > 0`) as soon as a file was opened, so the
-    app could not play at all there.
-  - pause keeps the audio: `ao_audiotrack` pauses the AudioTrack instead of
-    pausing and flushing it (backports of upstream `93a924a553` and
-    `4d03efb4b0` let the core do that for pull AOs). Each pause used to
-    throw away the 80–150 ms in the track, so the audio clock (and video with
-    it) jumped ahead by that on resume, with underrun warnings.
-- **FFmpeg: why a certificate was rejected** — with `tls_verify=1` a failed
-  verification now logs `tls_mbedtls: certificate verify failed: flags=0x…
-  (…)` before the unchanged `mbedtls_ssl_handshake returned -0x2700` (format
-  under "Log lines for embedders").
+  - **timer**: mpv's clock (`mp_raw_time_ns()`) is `CLOCK_MONOTONIC` on
+    Android, the platform's time base (`System.nanoTime()`, AudioTimestamp,
+    Choreographer). It was `CLOCK_MONOTONIC_RAW`, which on an arm64 3.18
+    kernel (the Android 7.0 emulator) jumps back and forth by 453 s between
+    calls: `mp_time_ns()` went negative and libmpv aborted in
+    `mp_time_us_add()` (`time_us > 0`, or `space >= 0` in `ao/buffer.c`) as
+    soon as a file was opened, so the app could not play at all there.
+    Clamping would not help (time would stand still for the 453 s); other
+    systems keep `CLOCK_MONOTONIC_RAW`. Checked on that emulator: local files
+    play with `ao=null` and `ao=audiotrack`, and play / pause / seek / a
+    second instance / EOF run without errors, where plynic.6 aborts.
+  - **pause keeps the audio**: `ao_audiotrack` pauses the AudioTrack instead
+    of pausing and flushing it (backports of upstream `93a924a553` "ao:
+    set_pause for pull based ao" and `4d03efb4b0` "ao: don't call
+    driver->set_paused after reset" let the core do that for pull AOs). Each
+    pause used to throw away the 80–150 ms in the track (AudioFlinger
+    reported 6112–7200 frames flushed per pause at 48 kHz), so the audio clock
+    (and video with it) jumped ahead by 166–211 ms on resume, with an
+    underrun warning. Now nothing is flushed: the track keeps its frames
+    while paused, and on resume the audio clock is 30–37 ms past the pause
+    point, without underruns (Android 14 TV emulator, 4 pauses of 1.5 s:
+    audio ahead of wall time by 0.14 s in total instead of 0.71 s).
+- **FFmpeg: why a certificate was rejected** (`tls_mbedtls_verify_flags.patch`)
+  — with `tls_verify=1` a failed verification used to log only
+  `mbedtls_ssl_handshake returned -0x2700`, the same for an expired
+  certificate, one for another host and an untrusted issuer. Now one `error`
+  line with mbedtls's verify flags and their names comes first, the old line
+  follows unchanged:
+
+  ```
+  tls: tls_mbedtls: certificate verify failed: flags=0x4 (BADCERT_CN_MISMATCH)
+  tls: mbedtls_ssl_handshake returned -0x2700
+  ```
+
+  Format, regular expression and the flag names are under "Log lines for
+  embedders". Checked against mbedtls 3.6.7 over TLS 1.3 and TLS 1.2:
+  `0x1` expired, `0x200` not yet valid, `0x4` host (name or IP address)
+  mismatch, `0x8` untrusted issuer, and combinations (`0x5`, `0xd`). A
+  certificate that passes, or a connection without `tls_verify`, logs
+  neither line.
+- Stripped libmpv.so, plynic.6 → plynic.7 (local build): 1.8–2.3 KB larger
+  per ABI. Exported symbols, `DT_NEEDED`, 16 KiB `PT_LOAD` alignment and
+  `BIND_NOW` without text relocations are unchanged.
 
 ### v1.1.11-plynic.6
 
