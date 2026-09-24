@@ -3,34 +3,59 @@
 Android `libmpv.so` builds for [plynic](https://github.com/linrong123/plynic),
 forked from [media-kit/libmpv-android-video-build](https://github.com/media-kit/libmpv-android-video-build) v1.1.11.
 
+Branches: `plynic/v0.41` builds mpv 0.41 with FFmpeg 8.1 (tags
+`v0.41.0-plynic.<n>`); `plynic/v1.1.11` is frozen and is what the 0.36-era
+`v1.1.11-plynic.1` … `.7` were built from, the rollback baseline.
+
 What differs from upstream:
 
 - **`plynic` flavor** (`buildscripts/flavors/plynic.sh`): upstream `full` without
   `--disable-swscale-alpha` (scaled PGS subtitles came out with opaque black
-  boxes) and with the spdif muxer.
+  boxes), with the spdif muxer, and without FFmpeg 8's MediaCodec *audio*
+  decoders.
 - **mpv from [plynic-mpv](https://github.com/linrong123/plynic-mpv)** at a pinned
   commit (`buildscripts/include/depinfo.sh`: `v_mpv`, `v_mpv_repo`): upstream
-  78d43740f5 plus a small patch stack (an Android VO that draws OSD/subtitles
-  into a second Surface, a JavaVM hook, `ao_audiotrack` fixes).
-- **FFmpeg TLS patches** (`buildscripts/patches/ffmpeg/tls_mbedtls_*.patch`):
-  with `tls_verify=1`, a host given as an IP address is checked against the
-  certificate's iPAddress subjectAltNames (`tls_mbedtls_ip_hostname.patch`);
-  a CA file in which some certificates cannot be parsed is used with the
-  others and a warning instead of failing (`tls_mbedtls_ca_partial.patch`);
-  a rejected server certificate is logged with the reasons
-  (`tls_mbedtls_verify_flags.patch`, format below).
+  `v0.41.0` plus upstream fixes and a small patch stack (an Android VO that
+  draws OSD/subtitles into a second Surface, a JavaVM hook, `ao_audiotrack`
+  fixes, the Android clock), listed in the plynic-mpv README.
+- **FFmpeg patches** (`buildscripts/patches/ffmpeg/`, applied in file name
+  order):
+  - `tls_mbedtls_ca_partial.patch`: a CA file in which some certificates
+    cannot be parsed is used with the others and a warning instead of failing;
+  - `tls_mbedtls_no_ip_sni.patch`: an IP address goes into the TLS SNI
+    extension only when the certificate is verified (mbedtls then needs it as
+    the hostname for the iPAddress subjectAltName check); without
+    verification it is left out, as RFC 6066 wants and as FFmpeg's OpenSSL and
+    GnuTLS backends do;
+  - `tls_mbedtls_verify_flags.patch`: a rejected server certificate is logged
+    with the reasons (format below);
+  - `upstream_http_*.patch`: FFmpeg's own fixes from master, not yet on the
+    8.1 branch (see v0.41.0-plynic.rc1 below).
 - **`--build-id=sha1`** on libmpv.so, so a native crash can be attributed to a
   build and symbolized against the release's `debug-symbols-plynic.zip`.
+- **`mpv-version` says which fork commit it is**: `mpv v0.41.0-plynic-g<first
+  9 hex digits of v_mpv>` (`scripts/mpv.sh`), the same string the Darwin build
+  stamps, instead of `git describe`.
 - **Subtitle charset detection**: mpv is built with iconv (GNU libiconv) and
   uchardet, so `sub-codepage=auto` turns GBK / Big5 / Shift_JIS / CP1251 …
   external subtitles into UTF-8 instead of Latin-1 mojibake.
 - **libmpv.so is linked with `--no-undefined`**: every dynamic import must
   resolve against the NDK stubs at link time, because a libmpv.so with an
   unresolved symbol does not load at all on Android.
-- Dependency security bumps; see the table below.
+- **Nothing of the C++ runtime is exported**: libplacebo needs the NDK's static
+  libc++, which is linked in and hidden (`--exclude-libs`), as are libplacebo,
+  libiconv and uchardet themselves. `DT_NEEDED` is `libm libandroid
+  libmediandk libdl libOpenSLES libEGL libc`; a `libc++_shared.so` there would
+  keep libmpv.so from loading (the app does not ship one).
+- **Every dependency is pinned**: git sources by tag *and* commit
+  (`download-deps.sh` refuses a moved tag), tarballs by SHA-256.
+- **The complete corresponding source is published with every release**
+  (`buildscripts/collect-sources.sh`, see below).
 - CI (`.github/workflows/plynic.yaml`): a tag `v<base>-plynic.<n>` builds the
   four ABIs and attaches `plynic-<abi>.jar`, `manifest.json` (digests, sizes,
-  build-ids, dependency versions) and `debug-symbols-plynic.zip` to the release.
+  build-ids, `DT_NEEDED`, dependency versions and commits, patch digests,
+  sources), `debug-symbols-plynic.zip` and `sources/*` to the release; a tag
+  `v<base>-plynic.rc<n>` is published as a prerelease.
 
 ## Log lines for embedders
 
@@ -39,17 +64,24 @@ they arrive as log messages with prefix `ffmpeg`; the text starts with the
 URL protocol's name, `tls: ` (also for the TLS connection under an
 `https://` URL or an HLS segment).
 
-**Server certificate rejected** (`tls_verify=1`), two `error` lines, in this
-order:
+**Server certificate rejected** (`tls_verify=1`): the first `error` line is
+plynic's, FFmpeg's own follow it:
 
 ```
 tls: tls_mbedtls: certificate verify failed: flags=0x5 (BADCERT_EXPIRED|BADCERT_CN_MISMATCH)
-tls: mbedtls_ssl_handshake returned -0x2700
+tls: mbedtls_ssl_get_verify_result reported problems with the certificate verification, returned flags: 5
 ```
 
-- The second line is FFmpeg's own and unchanged
-  (`MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`); a parser that only knows it keeps
-  working.
+- FFmpeg's lines are **not stable across versions**, key on the first one.
+  FFmpeg 8.1 completes the handshake with mbedtls's `VERIFY_OPTIONAL` and
+  checks the result afterwards, so its line is `mbedtls_ssl_get_verify_result
+  reported problems with the certificate verification, returned flags: <n>`
+  (decimal), followed by `The certificate is not correctly signed by the
+  trusted CA.` when `BADCERT_NOT_TRUSTED` is set. FFmpeg 6.0
+  (`v1.1.11-plynic.*`) printed `mbedtls_ssl_handshake returned -0x2700`
+  instead. `Certificate verification failed.`, which FFmpeg 8.1 has for a
+  handshake that fails with `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`, does not
+  occur with that setup (the flags line precedes it if it ever does).
 - `flags` is `mbedtls_ssl_get_verify_result()` in lowercase hex, no padding.
   Regular expression for the first line:
   `^tls: tls_mbedtls: certificate verify failed: flags=0x([0-9a-f]+) \(([A-Z0-9_|]*)\)$`
@@ -76,20 +108,23 @@ tls: mbedtls_ssl_handshake returned -0x2700
   Checked against mbedtls 3.6.7 over TLS 1.3 and TLS 1.2.
 
 **CA file**: `tls: mbedtls_x509_crt_parse_file for CA cert returned <n>`
-(`error`: `n` < 0, or not a single certificate could be parsed) and
-`tls: Skipped <n> certificate(s) of the CA file that could not be parsed,
-<m> loaded` (`warning`), see `tls_mbedtls_ca_partial.patch`.
+(`error`: `n` < 0, or not a single certificate could be parsed; the same in
+FFmpeg 6.0 and 8.1) and `tls: Skipped <n> certificate(s) of the CA file that
+could not be parsed, <m> loaded` (`warning`), see
+`tls_mbedtls_ca_partial.patch`.
 
 ## Dependencies
 
 Everything below is linked statically into `libmpv.so`. Versions are pinned in
-`buildscripts/include/depinfo.sh` (tarballs also by SHA-256) and published in
-each release's `manifest.json` under `deps`.
+`buildscripts/include/depinfo.sh` (git sources by tag and commit, tarballs by
+SHA-256) and published in each release's `manifest.json` under `deps` and
+`dep_commits`.
 
 | Library | Version | Licence (as used here) | Notes |
 |---|---|---|---|
 | mpv (plynic-mpv) | `v_mpv` commit | LGPL-2.1-or-later | `-Dgpl=false` |
-| FFmpeg | 6.0 | LGPL-3.0-or-later | `--disable-gpl --enable-version3`; version 3 is what lets it link mbedtls's Apache-2.0 code. `--disable-iconv` on purpose, see the flavor file |
+| FFmpeg | 8.1.3 (`1041abdc96`) | LGPL-3.0-or-later | `--disable-gpl --enable-version3`; version 3 is what lets it link mbedtls's Apache-2.0 code. `--disable-iconv` on purpose, see the flavor file |
+| libplacebo | 7.360.1 | LGPL-2.1-or-later | OpenGL (ES) only: no Vulkan, LittleCMS, Dolby Vision. Its submodules: glad (MIT; the GL loader it generates is (WTFPL OR CC0-1.0) AND Apache-2.0), fast_float (Apache-2.0 OR MIT OR BSL-1.0), Vulkan-Headers (headers only); jinja/markupsafe only run at build time |
 | mbedtls | 3.6.7 (LTS) | Apache-2.0 (dual Apache-2.0 / GPL-2.0-or-later) | release tarball (a git checkout of the tag lacks `framework/`); `MBEDTLS_PLATFORM_DEV_RANDOM="/dev/urandom"`, `MBEDTLS_THREADING_C` + `_PTHREAD`, see `scripts/mbedtls.sh` |
 | dav1d | 1.5.4 | BSD-2-Clause | |
 | libxml2 | 2.14.6 | MIT | |
@@ -98,10 +133,95 @@ each release's `manifest.json` under `deps`.
 | FriBidi | 1.0.17 | LGPL-2.1-or-later | |
 | HarfBuzz | 11.5.1 | MIT ("Old MIT") | |
 | GNU libiconv | 1.19 | LGPL-2.1-or-later | the library only; the GPL-3.0 `iconv` program and its gnulib are never built. Default encoding set (no `--enable-extra-encodings`) |
-| uchardet | 0.0.8 | LGPL-2.1-or-later (tri-licensed MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later) | C++ without exceptions/RTTI against the NDK "system" runtime, so libmpv.so gains `DT_NEEDED libstdc++.so` (the platform's operator new/delete, a stable public NDK library) |
+| uchardet | 0.0.8 | LGPL-2.1-or-later (tri-licensed MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later) | C++ without exceptions/RTTI |
+| LLVM libc++ / libc++abi / libunwind (NDK r25c, static) | — | Apache-2.0 WITH LLVM-exception | for libplacebo's C++ parts and uchardet's `operator new`/`delete`; hidden |
 
 The build scripts themselves are MIT (see `LICENSE`). The plynic patches to
-mpv are published under mpv's terms in the plynic-mpv repository.
+mpv are published under mpv's terms in the plynic-mpv repository, the FFmpeg
+patches under FFmpeg's.
+
+## Corresponding source
+
+Every release built by the workflow carries, next to the jars, the complete
+source its `libmpv.so` was built from (`buildscripts/collect-sources.sh`):
+one archive per dependency at the pinned commit (`git archive`, submodules
+included) or the upstream release tarball itself (same SHA-256 as upstream's),
+the plynic-mpv tree at `v_mpv`, the patches, media-kit-android-helper (the
+jar's other `.so` files), this repository at the tagged commit,
+`SOURCES.json` (version, licence, upstream location and commit or digest,
+SHA-256, patches of each file) and `SHA256SUMS`. `manifest.json` lists the
+same files.
+
+Retention: a release that any published plynic version pinned is never
+deleted, and its source stays available for at least three years after that
+plynic version was last distributed.
+
+## Releases
+
+### v0.41.0-plynic.rc1
+
+Release candidate of the move to mpv 0.41 and FFmpeg 8.1 (spec 0017 stage 3,
+rc1 = rebase plus upstream fixes; published as a prerelease, not pinned by
+the app).
+
+- **mpv: plynic-mpv `ed162a9` (78d43740f5 base) → `8235270d93`** (branch
+  `plynic/v0.41.0`, upstream `v0.41.0` + 10 cherry-picked upstream fixes + the
+  plynic topics; details in the plynic-mpv README). Needs libplacebo now.
+- **FFmpeg 6.0 → 8.1.3**, commit-verified. media-kit's `dash_base_url_escape`
+  and `hls_mp4_seek` are upstream now and are dropped. The three TLS patches
+  are rewritten for 8.1 (the verify-flags line now hooks the post-handshake
+  check 8.1 does, see "Log lines"); `tls_mbedtls_ip_hostname.patch` shrank to
+  `tls_mbedtls_no_ip_sni.patch`, since 8.1.3 itself sets the hostname for IP
+  addresses (so IP-address hosts are verified against iPAddress SANs without
+  a patch).
+- **FFmpeg HTTP, backported from master** (`upstream_http_*.patch`, verbatim
+  `git format-patch` of `f87323a359` "properly fall back on soft seek
+  failure" and `bd51105806` "infer default s->willclose based on request
+  header"): 8.1 reuses the connection for a seek ("soft seek") unless the
+  server answered `Connection: close`, although FFmpeg itself sends
+  `Connection: close` by default. A server that closes such a connection
+  without echoing the header (Python's `http.server` does) made every seek
+  after the first request fail with `Error reading HTTP response` and the
+  file stop playing — HTTP and HTTPS alike, where FFmpeg 6.0 simply opened a
+  new connection. With the backports a seek opens a new connection again (3
+  connections for open + 2 seeks, as with 6.0).
+- **flavor**: `--disable-postproc` and `--enable-protocol=hls` removed (both
+  gone from FFmpeg 8); MediaCodec audio decoders disabled; `--enable-small`
+  kept for now.
+- **libplacebo 7.360.1** new (`scripts/libplacebo.sh`), with its C++ runtime
+  hidden, see above.
+- **mpv build**: `-Dlibplacebo=disabled` removed (no such option in 0.41);
+  `audiotrack`, `opensles`, `egl-android`, `android-media-ndk` required;
+  `aaudio` (new in mpv 0.38) off; version stamp.
+- **`DT_NEEDED`**: `+libmediandk.so` (FFmpeg 8's MediaCodec wrapper links the
+  NDK media API, API 21), `-libstdc++.so` (uchardet's `operator new/delete`
+  now come from the hidden static libc++). All imports resolve against the
+  API 21 NDK stubs (`--no-undefined`).
+- **Exported symbols**: the 55 `mpv_*` functions are the same names and types
+  as in plynic.7 on all four ABIs. FFmpeg's exports follow 8.1: 136 new
+  `av*`/`sws*`/`swr*` names (arm64), and the APIs FFmpeg 8 removed are gone
+  (the old channel-layout functions, the old `av_fifo_*`, `avcodec_close`,
+  `av_stream_*_side_data`, `swr_alloc_set_opts`, …); the app calls none of
+  them. `pl_*`, C++ runtime and `__cxa_*` symbols are not exported.
+- **Dependencies pinned by commit**; **sources** published with the release.
+- **meson** pinned to 1.10.0 in CI (mpv 0.41 needs >= 1.3.0).
+- NDK r25c (`25.2.9519653`) builds libplacebo's C++20 as is.
+- Stripped libmpv.so, plynic.7 (CI) → rc1 (local build): arm64 17.10 → 19.80
+  MB, armeabi-v7a 16.31 → 18.52 MB, x86 17.85 → 20.43 MB, x86_64 20.98 →
+  23.69 MB. 16 KiB `PT_LOAD` alignment and `BIND_NOW` without text
+  relocations are unchanged.
+- Checked on the Android 14 TV emulator (arm64) and an Android 7.0 arm64
+  emulator: local files play with `ao=null` and `ao=audiotrack`; play, pause,
+  seek, a second instance and EOF without errors; pausing keeps the track's
+  frames (AudioFlinger: 0 flushed); `mediacodec_embed` and `mediacodec_osd`
+  with VP9 through MediaCodec, PGS and ASS drawn into the OSD surface, a
+  track switch, `sub-keepout` and `sub-visibility` redrawn while paused; the
+  `vo=gpu` fallback (runtime switch from `mediacodec_embed`, Theora) shows
+  the picture; GBK/Big5/CP1251 external subtitles detected and converted;
+  the TLS matrix (TLS 1.3 and 1.2; host name and IP; expired, not yet valid,
+  wrong host, untrusted, self-signed, combinations; partial and unusable CA
+  files; `tls-verify=no`) gives the same verdicts and flags as plynic.7, and
+  IP addresses reach the server's SNI only when verifying.
 
 ### v1.1.11-plynic.7
 
@@ -220,8 +340,10 @@ mpv are published under mpv's terms in the plynic-mpv repository.
 
 ## Building
 
-Local build on macOS (no Docker): `buildscripts/plynic-build.sh --flavor plynic arm64 armv7l`,
-then `buildscripts/plynic-export.sh` → `buildscripts/out/<abi>/libmpv.so`.
-See `buildscripts/plynic-build.sh` for the expectations (NDK path, `deps/mpv`).
-Host tools: meson, ninja, cmake, nasm, pkg-config, python3, autotools, GNU
-sed/install (`gsed`, `ginstall` on macOS).
+Local build on macOS (no Docker): `buildscripts/plynic-build.sh --flavor plynic arm64 armv7l x86_64 x86`,
+then `buildscripts/plynic-export.sh` → `buildscripts/out/<abi>/libmpv.so` and
+`out/buildinfo.json`; `buildscripts/collect-sources.sh` collects the sources.
+See `buildscripts/plynic-build.sh` for the expectations (NDK path, `deps/mpv`
+a symlink to a plynic-mpv checkout). Host tools: meson (>= 1.3.0), ninja,
+cmake, nasm, pkg-config, python3 (mbedtls's config.py, libplacebo's GL loader
+generator), autotools, GNU sed/install (`gsed`, `ginstall` on macOS).
