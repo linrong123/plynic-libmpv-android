@@ -32,11 +32,17 @@ fetch () {
 }
 
 # tarball <dir> <url> <sha256>: download, check the digest, unpack into <dir>.
+#   The release tarball itself is kept in deps/.tarballs/: collect-sources.sh
+#   publishes it as is, byte-identical to upstream's (same sha256).
 tarball () {
-	local dir=$1 url=$2 want=$3 file=${2##*/} got
-	rm -f "$file"
-	$WGET "$url"
-	got=$( (sha256sum "$file" 2>/dev/null || shasum -a 256 "$file") | cut -d' ' -f1)
+	local dir=$1 url=$2 want=$3 file=.tarballs/${2##*/} got
+	mkdir -p .tarballs
+	sha () { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
+	if [ ! -f "$file" ] || [ "$(sha "$file")" != "$want" ]; then
+		rm -f "$file"
+		$WGET -O "$file" "$url"
+	fi
+	got=$(sha "$file")
 	if [ "$got" != "$want" ]; then
 		echo "$file: sha256 $got, expected $want" >&2
 		rm -f "$file"
@@ -44,7 +50,22 @@ tarball () {
 	fi
 	mkdir "$dir"
 	tar -xf "$file" -C "$dir" --strip-components=1
-	rm "$file"
+}
+
+# gitclone <dir> <url> <tag> <commit> [git clone options...]: shallow clone of
+#   <tag>, refused unless its HEAD is <commit>. A tag can be moved or
+#   recreated upstream; the commit is what the release was built and its
+#   sources published from (collect-sources.sh).
+gitclone () {
+	local dir=$1 url=$2 tag=$3 want=$4 got
+	shift 4
+	git -c advice.detachedHead=false clone --depth 1 --branch "$tag" "$@" "$url" "$dir"
+	got=$(git -C "$dir" rev-parse HEAD)
+	if [ "$got" != "$want" ]; then
+		echo "$dir: tag $tag is commit $got, expected $want" >&2
+		rm -rf "$dir"
+		return 1
+	fi
 }
 
 # mbedtls
@@ -52,12 +73,12 @@ fetch mbedtls "mbedtls-$v_mbedtls.tar.bz2 $v_mbedtls_sha256" \
 	tarball mbedtls https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$v_mbedtls/mbedtls-$v_mbedtls.tar.bz2 $v_mbedtls_sha256
 
 # dav1d
-fetch dav1d "dav1d $v_dav1d" \
-	git clone --depth 1 --branch $v_dav1d https://code.videolan.org/videolan/dav1d.git dav1d
+fetch dav1d "dav1d $v_dav1d $v_dav1d_commit" \
+	gitclone dav1d https://code.videolan.org/videolan/dav1d.git $v_dav1d $v_dav1d_commit
 
 # libxml2
-fetch libxml2 "libxml2 v$v_libxml2" \
-	git clone --depth 1 --branch v$v_libxml2 --recursive https://gitlab.gnome.org/GNOME/libxml2.git libxml2
+fetch libxml2 "libxml2 v$v_libxml2 $v_libxml2_commit" \
+	gitclone libxml2 https://gitlab.gnome.org/GNOME/libxml2.git v$v_libxml2 $v_libxml2_commit --recursive
 
 # libiconv (GNU, LGPL-2.1+ library; only lib/ is built, see scripts/libiconv.sh)
 fetch libiconv "libiconv-$v_libiconv.tar.gz $v_libiconv_sha256" \
@@ -68,24 +89,24 @@ fetch uchardet "uchardet-$v_uchardet.tar.xz $v_uchardet_sha256" \
 	tarball uchardet https://www.freedesktop.org/software/uchardet/releases/uchardet-$v_uchardet.tar.xz $v_uchardet_sha256
 
 # ffmpeg
-fetch ffmpeg "ffmpeg n$v_ffmpeg" \
-	git clone --depth 1 --branch n$v_ffmpeg https://github.com/FFmpeg/FFmpeg.git ffmpeg
+fetch ffmpeg "ffmpeg n$v_ffmpeg $v_ffmpeg_commit" \
+	gitclone ffmpeg https://github.com/FFmpeg/FFmpeg.git n$v_ffmpeg $v_ffmpeg_commit
 
 # freetype2
-fetch freetype "freetype VER-$v_freetype" \
-	git clone --depth 1 --branch VER-$v_freetype https://gitlab.freedesktop.org/freetype/freetype.git freetype
+fetch freetype "freetype VER-$v_freetype $v_freetype_commit" \
+	gitclone freetype https://gitlab.freedesktop.org/freetype/freetype.git VER-$v_freetype $v_freetype_commit
 
 # fribidi
-fetch fribidi "fribidi v$v_fribidi" \
-	git clone --depth 1 --branch v$v_fribidi https://github.com/fribidi/fribidi.git fribidi
+fetch fribidi "fribidi v$v_fribidi $v_fribidi_commit" \
+	gitclone fribidi https://github.com/fribidi/fribidi.git v$v_fribidi $v_fribidi_commit
 
 # harfbuzz
-fetch harfbuzz "harfbuzz $v_harfbuzz" \
-	git clone --depth 1 --branch $v_harfbuzz https://github.com/harfbuzz/harfbuzz.git harfbuzz
+fetch harfbuzz "harfbuzz $v_harfbuzz $v_harfbuzz_commit" \
+	gitclone harfbuzz https://github.com/harfbuzz/harfbuzz.git $v_harfbuzz $v_harfbuzz_commit
 
 # libass
-fetch libass "libass $v_libass" \
-	git clone --depth 1 --branch $v_libass https://github.com/libass/libass.git libass
+fetch libass "libass $v_libass $v_libass_commit" \
+	gitclone libass https://github.com/libass/libass.git $v_libass $v_libass_commit
 
 [ "$only" == "  " ] || exit 0
 
@@ -118,7 +139,7 @@ HEREDOC
 [ ! -d fftools_ffi ] && git clone https://github.com/moffatman/fftools-ffi.git fftools_ffi && cd fftools_ffi && git reset --hard 9b0d4da026d9c830702ec043c1f1f98d407025af && cd ..
 
 # media-kit-android-helper
-[ ! -d media-kit-android-helper ] && git clone --branch main https://github.com/media-kit/media-kit-android-helper.git && cd media-kit-android-helper && git reset --hard 42054e5d479f39ccbb0ae604862e2bcaf59b74c2 && cd ..
+[ ! -d media-kit-android-helper ] && git clone --branch main https://github.com/media-kit/media-kit-android-helper.git && cd media-kit-android-helper && git reset --hard $v_mkhelper_commit && cd ..
 
 # media_kit
 [ ! -d media_kit ] && git clone --depth 1 --single-branch --branch main https://github.com/alexmercerind/media_kit.git
