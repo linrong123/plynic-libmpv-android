@@ -57,6 +57,13 @@ unset CC CXX # meson wants these unset
 # libstdc++.so any more, and must never get one on libc++_shared.so, which
 # the app does not ship.
 #
+# compiler-rt's builtins archive (libclang_rt.builtins-<arch>-android.a,
+# which the clang driver appends to every link) is hidden too: libc++abi's
+# per-thread exception state (cxa_exception_storage.o) is thread_local, which
+# goes through emulated TLS below API 29, and __emutls_get_address comes from
+# that archive. rc1-rc3 exported it from libmpv.so on every ABI. The four
+# names cover the four ABIs; lld ignores the ones not on the link line.
+#
 # --no-undefined: mpv's meson.build sets b_lundef=false, so a symbol nothing
 # on the link line defines used to become a silent dynamic import. On Android
 # such a libmpv.so does not load at all ("cannot locate symbol"). The first
@@ -113,7 +120,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
  	-Dmanpage-build=disabled \
 	-Dbuild-date=false \
 	-Dc_args="-I$prefix_dir/include" \
-	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a:libplacebo.a:libc++_static.a:libc++abi.a:libunwind.a -Wl,--no-undefined -Wl,--build-id=sha1"
+	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a:libplacebo.a:libc++_static.a:libc++abi.a:libunwind.a:libclang_rt.builtins-aarch64-android.a:libclang_rt.builtins-arm-android.a:libclang_rt.builtins-i686-android.a:libclang_rt.builtins-x86_64-android.a -Wl,--no-undefined -Wl,--build-id=sha1"
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install
