@@ -13,7 +13,10 @@
 #     only the unstripped file turns that into a function and a line;
 #   * the complete corresponding source goes next to them (sources/, see
 #     collect-sources.sh), collected from the pinned trees before patch.sh
-#     touches them, and listed in the manifest.
+#     touches them, and listed in the manifest;
+#   * what libmpv.so takes from the NDK as it is (zlib, the LLVM runtimes)
+#     is added to SOURCES.json after the build, from lld's archive stats
+#     (include/static-system.py), and copied into the manifest.
 set -euxo pipefail
 cd "$(dirname "$0")"
 
@@ -28,8 +31,10 @@ chmod +x scripts/*.sh
 ./build.sh
 
 . ./include/depinfo.sh
-ndk_bin=$(echo "$PWD/sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/"*)/bin
 abis=(arm64-v8a armeabi-v7a x86 x86_64)
+./include/static-system.py artifacts/plynic/sources "sdk/android-sdk-linux/ndk/$v_ndk" \
+  $(for abi in "${abis[@]}"; do echo "prefix/$abi/libmpv.archive-stats.tsv"; done)
+ndk_bin=$(echo "$PWD/sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/"*)/bin
 
 # Unstripped copies first; the jars get the stripped ones.
 mkdir -p artifacts/plynic/symbols
@@ -88,6 +93,8 @@ out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""),
        "patches": {p["file"]: p["sha256"] for p in sources["patches"]},
        "sources": [{k: e[k] for k in ("file", "id", "version", "license", "sha256", "size")}
                    for e in sources["sources"]],
+       # linked from the NDK as it is, no source archive here (static-system.py)
+       "static_system": sources.get("static_system", []),
        "jar_entry_prefix": "lib/{abi}/", "abis": {}}
 for abi in abis:
     jar_path = f"artifacts/plynic/plynic-{abi}.jar"

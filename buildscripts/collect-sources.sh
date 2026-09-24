@@ -27,7 +27,11 @@
 #                                the jar's other .so files are built from it
 #   SOURCES.json                 one entry per file: what it is, version,
 #                                licence, upstream location and commit or
-#                                digest, sha256, size, patches applied
+#                                digest, sha256, size, patches applied;
+#                                after the build, include/static-system.py
+#                                adds "static_system": what libmpv.so links
+#                                from the NDK as it is (zlib, the LLVM
+#                                runtimes), with no archive here
 #   SHA256SUMS                   sha256sum -c format
 #
 # Archives are deterministic for a given git and xz: git archive stamps
