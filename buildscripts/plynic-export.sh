@@ -6,8 +6,9 @@
 #                                   crash records report `libmpv.so+0x<pc>` plus
 #                                   a BuildId, and only this file turns that
 #                                   into a function and a line
-#   out/buildinfo.json              mpv commit, flavor, dependency versions
-#                                   (include/depinfo.sh), per-ABI md5 + BuildId
+#   out/buildinfo.json              mpv commit and version stamp, flavor,
+#                                   dependency versions (include/depinfo.sh),
+#                                   per-ABI md5 + BuildId + DT_NEEDED
 #
 # Usage: ./plynic-export.sh           (every ABI present under prefix/)
 set -eu
@@ -32,12 +33,16 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   md5=$(md5 -q "out/$abi/libmpv.so")
   size=$(stat -f %z "out/$abi/libmpv.so")
   bid=$("$ndk_bin/llvm-readelf" -n "$src" 2>/dev/null | awk '/Build ID/{print $3}')
+  needed=$("$ndk_bin/llvm-readelf" -d "$src" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/"\1"/p' | paste -sd, -)
   printf '%-12s %9s bytes  md5 %s  BuildId %s\n' "$abi" "$size" "$md5" "${bid:-none}"
-  entries="$entries${entries:+,}\n    \"$abi\": {\"md5\": \"$md5\", \"size\": $size, \"build_id\": \"${bid:-}\"}"
+  entries="$entries${entries:+,}\n    \"$abi\": {\"md5\": \"$md5\", \"size\": $size, \"build_id\": \"${bid:-}\", \"needed\": [$needed]}"
 done
+# What mpv-version reports; scripts/mpv.sh wrote it into the stub it gives
+# meson in place of git describe.
+mpv_version=$(sed -n 's/^echo //p' prefix/*/plynic-mpv-version 2>/dev/null | sort -u | paste -sd' ' -)
 # Same keys as the CI manifest's "deps" (bundle_plynic.sh).
-deps=$(printf '"ffmpeg": "%s", "libass": "%s", "harfbuzz": "%s", "freetype": "%s", "fribidi": "%s", "libxml2": "%s", "mbedtls": "%s", "dav1d": "%s", "libiconv": "%s", "uchardet": "%s"' \
-  "$v_ffmpeg" "$v_libass" "$v_harfbuzz" "${v_freetype//-/.}" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet")
-printf '{\n  "mpv_commit": "%s",\n  "mpv_dirty": %s,\n  "flavor": "%s",\n  "ndk": "%s",\n  "deps": {%s},\n  "abis": {%b\n  }\n}\n' \
-  "$mpv_commit" "$mpv_dirty" "$flavor" "$v_ndk" "$deps" "$entries" > out/buildinfo.json
+deps=$(printf '"ffmpeg": "%s", "libplacebo": "%s", "libass": "%s", "harfbuzz": "%s", "freetype": "%s", "fribidi": "%s", "libxml2": "%s", "mbedtls": "%s", "dav1d": "%s", "libiconv": "%s", "uchardet": "%s"' \
+  "$v_ffmpeg" "$v_libplacebo" "$v_libass" "$v_harfbuzz" "${v_freetype//-/.}" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet")
+printf '{\n  "mpv_commit": "%s",\n  "mpv_dirty": %s,\n  "mpv_version": "%s",\n  "flavor": "%s",\n  "ndk": "%s",\n  "deps": {%s},\n  "abis": {%b\n  }\n}\n' \
+  "$mpv_commit" "$mpv_dirty" "$mpv_version" "$flavor" "$v_ndk" "$deps" "$entries" > out/buildinfo.json
 echo "wrote out/buildinfo.json (mpv $mpv_commit dirty=$mpv_dirty flavor=$flavor)"

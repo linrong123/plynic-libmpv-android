@@ -47,20 +47,55 @@ unset CC CXX # meson wants these unset
 # --exclude-libs keeps the two archives' symbols out of libmpv.so's dynamic
 # symbol table; nothing outside libmpv calls them.
 #
+# libplacebo (mpv 0.41) is hidden the same way, and so is the C++ runtime it
+# brings: its .pc adds -lc++, which --prefer-static resolves to the NDK's
+# static libc++ (libc++_static.a + libc++abi.a, unwinder libunwind.a).
+# Exported from libmpv.so, std::exception, operator new/delete and __cxa_*
+# would be offered to every other library in the process. uchardet's
+# operator new/delete (plynic.7: from the platform's libstdc++.so) now bind
+# to that same static runtime, so libmpv.so has no DT_NEEDED on
+# libstdc++.so any more, and must never get one on libc++_shared.so, which
+# the app does not ship.
+#
 # --no-undefined: mpv's meson.build sets b_lundef=false, so a symbol nothing
 # on the link line defines used to become a silent dynamic import. On Android
 # such a libmpv.so does not load at all ("cannot locate symbol"). The first
 # uchardet link did exactly that (async_safe_fatal_no_abort, from the NDK's
 # static libstdc++.a; see scripts/uchardet.sh). Every import now has to
 # resolve against the API-level stubs of the NEEDED libraries at link time.
-for f in lib/libiconv.a include/iconv.h lib/pkgconfig/uchardet.pc; do
+for f in lib/libiconv.a include/iconv.h lib/pkgconfig/uchardet.pc lib/pkgconfig/libplacebo.pc; do
 	[ -e "$prefix_dir/$f" ] && continue
-	echo "mpv: $prefix_dir/$f is missing; build libiconv and uchardet first" \
-		"(plynic-build.sh without --mpv-only, or --only libiconv,uchardet)" >&2
+	echo "mpv: $prefix_dir/$f is missing; build libiconv, uchardet and libplacebo first" \
+		"(plynic-build.sh without --mpv-only, or --only libiconv,uchardet,libplacebo)" >&2
 	exit 1
 done
 
+# Version stamp (spec 0017 TD3): mpv-version reads
+# "mpv v<MPV_VERSION>-plynic-g<first 9 hex digits of the commit>", e.g.
+# "mpv v0.41.0-plynic-g1a2b3c4d5", whether the tree is a git checkout (here)
+# or an exported source tree (the Darwin build, which stamps the same string
+# into MPV_VERSION), so both platforms' engines say which fork commit they
+# are. mpv's own common/meson.build would run `git describe` instead
+# (v0.41.0-<n>-g<sha>, or v0.41.0-dev-g<sha> without the upstream tags). A
+# second cross file points its find_program('git') at a stub that prints the
+# stamp; the source tree is not touched. "-dirty" marks a local build of
+# uncommitted work.
+sha=$(git rev-parse HEAD)
+dirty=
+[ -n "$(git status --porcelain --untracked-files=no)" ] && dirty=-dirty
+stamp="v$(cat MPV_VERSION)-plynic-g${sha:0:9}$dirty"
+stub="$prefix_dir/plynic-mpv-version"
+printf '#!/bin/sh\n# stands in for git describe, see scripts/mpv.sh\necho %s\n' "$stamp" > "$stub"
+chmod +x "$stub"
+printf "[binaries]\ngit = '%s'\n" "$stub" > "$prefix_dir/plynic-mpv-version.ini"
+echo "mpv: version $stamp"
+
+# The AOs are the ones plynic.7 had (audiotrack, opensles), and the Android
+# features the app relies on are required, so a missing one fails the build
+# instead of silently dropping out. aaudio (new since 0.38, dlopen()ed) stays
+# off until the app wants it.
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
+	--cross-file "$prefix_dir"/plynic-mpv-version.ini \
 	--prefer-static \
 	--default-library shared \
 	-Dgpl=false \
@@ -70,11 +105,15 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	-Diconv=enabled \
 	-Duchardet=enabled \
 	-Dvulkan=disabled \
-   	-Dlibplacebo=disabled \
+	-Daudiotrack=enabled \
+	-Dopensles=enabled \
+	-Daaudio=disabled \
+	-Degl-android=enabled \
+	-Dandroid-media-ndk=enabled \
  	-Dmanpage-build=disabled \
 	-Dbuild-date=false \
 	-Dc_args="-I$prefix_dir/include" \
-	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a -Wl,--no-undefined -Wl,--build-id=sha1"
+	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a:libplacebo.a:libc++_static.a:libc++abi.a:libunwind.a -Wl,--no-undefined -Wl,--build-id=sha1"
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install

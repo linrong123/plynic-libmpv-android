@@ -31,12 +31,18 @@ v_libiconv=1.19
 v_libiconv_sha256=88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6
 v_uchardet=0.0.8
 v_uchardet_sha256=e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0
-v_ffmpeg=6.0
-v_ffmpeg_commit=ea3d24bbe3c58b171e55fe2151fc7ffaca3ab3d2
-# plynic-mpv fork: upstream 78d43740f5 + the plynic patch stack (default
-# branch plynic/78d43740f5 of the repo below). Pin the fork's commit, not the
-# branch, so a rebuilt tag is bit-for-bit the same engine.
-v_mpv=ed162a9101728581ccc374e5cec876ea74114903
+v_ffmpeg=8.1.3
+v_ffmpeg_commit=1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7
+# libplacebo: mpv 0.41 requires it (vo=gpu links its colour/shader helpers).
+# Built with its git submodules (glad, jinja, markupsafe, fast_float,
+# Vulkan-Headers), which the release tarballs lack; the tag commit pins them.
+v_libplacebo=7.360.1
+v_libplacebo_commit=cee9b076f2c63104ccfd497fa79c39a867293ec4
+# plynic-mpv fork: upstream v0.41.0 + the plynic patch stack (branch
+# plynic/v0.41.0 of the repo below; plynic/78d43740f5 is frozen and backs the
+# v1.1.11-plynic.* releases). Pin the fork's commit, not the branch, so a
+# rebuilt tag is bit-for-bit the same engine.
+v_mpv=8235270d93cc986b012006701d7ff3318095ecec
 v_mpv_repo=https://github.com/linrong123/plynic-mpv.git
 # media-kit's Android helper: the jar's other .so files come from its APK
 v_mkhelper_commit=42054e5d479f39ccbb0ae604862e2bcaf59b74c2
@@ -61,11 +67,12 @@ dep_fribidi=()
 dep_harfbuzz=()
 dep_libass=(freetype fribidi harfbuzz)
 dep_libiconv=()
+dep_libplacebo=()
 dep_uchardet=()
 dep_lua=()
 dep_shaderc=()
 if [ -n "${ENCODERS_GPL+x}" ]; then
-	dep_mpv=(ffmpeg libass libiconv uchardet fftools_ffi)
+	dep_mpv=(ffmpeg libass libplacebo libiconv uchardet fftools_ffi)
 else
-	dep_mpv=(ffmpeg libass libiconv uchardet)
+	dep_mpv=(ffmpeg libass libplacebo libiconv uchardet)
 fi

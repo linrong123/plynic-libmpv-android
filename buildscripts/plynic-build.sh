@@ -45,7 +45,7 @@ done
 [ ${#archs[@]} -eq 0 ] && archs=(arm64)
 [ -f "flavors/$flavor.sh" ] || { echo "no such flavor: $flavor" >&2; exit 2; }
 
-all_targets=(mbedtls dav1d libxml2 ffmpeg freetype fribidi harfbuzz libass libiconv uchardet mpv)
+all_targets=(mbedtls dav1d libxml2 ffmpeg freetype fribidi harfbuzz libass libiconv uchardet libplacebo mpv)
 targets=("${all_targets[@]}")
 [ $mpv_only -eq 1 ] && only=mpv
 if [ -n "$only" ]; then

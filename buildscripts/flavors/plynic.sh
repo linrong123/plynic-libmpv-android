@@ -19,6 +19,17 @@
 # FFmpeg would only use iconv for AVCodecContext.sub_charenc, which mpv turns
 # off (sub/lavc_conv.c: FF_SUB_CHARENC_MODE_IGNORE), and for DVB service
 # names in MPEG-TS program metadata, which mpv does not expose.
+#
+# FFmpeg 8: postproc and the old hls: protocol are gone from configure
+# (--disable-postproc is now an error, --enable-protocol=hls a warning); HLS
+# is the hls demuxer, which never used that protocol. 8.0 added MediaCodec
+# *audio* decoders (aac, amrnb, amrwb, mp3); they are disabled so that audio
+# keeps decoding in FFmpeg exactly as before (mpv would not pick them by
+# default, but a decoder that is not there cannot be picked by accident).
+#
+# --enable-small is kept for now (spec 0017 TD7): it builds FFmpeg with -Os,
+# which may slow down the pure-C software decoders (RV60, Hi10P) on 32-bit
+# TVs. Dropping it waits for an -Os/-O3 comparison on such a device.
 
 . ../../include/depinfo.sh
 . ../../include/path.sh
@@ -59,6 +70,7 @@ cpuflags=
 	--pkg-config-flags=--static \
 	\
 	--enable-decoders \
+	--disable-decoder=aac_mediacodec,amrnb_mediacodec,amrwb_mediacodec,mp3_mediacodec \
 	--enable-demuxers \
 	--enable-parsers \
 	\
@@ -69,7 +81,6 @@ cpuflags=
 	--disable-filters \
 	--disable-doc \
 	--disable-avdevice \
-	--disable-postproc \
 	--disable-programs \
 	--disable-gray \
 	\
@@ -115,7 +126,6 @@ cpuflags=
 	--enable-protocol=ffrtmphttp \
 	--enable-protocol=file \
 	--enable-protocol=ftp \
-	--enable-protocol=hls \
 	--enable-protocol=http \
 	--enable-protocol=httpproxy \
 	--enable-protocol=https \
@@ -145,7 +155,6 @@ make -j$cores
 make DESTDIR="$prefix_dir" install
 
 ln -sf "$prefix_dir"/lib/libswresample.so "$native_dir"
-ln -sf "$prefix_dir"/lib/libpostproc.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavutil.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavcodec.so "$native_dir"
 ln -sf "$prefix_dir"/lib/libavformat.so "$native_dir"

@@ -108,6 +108,11 @@ fetch harfbuzz "harfbuzz $v_harfbuzz $v_harfbuzz_commit" \
 fetch libass "libass $v_libass $v_libass_commit" \
 	gitclone libass https://github.com/libass/libass.git $v_libass $v_libass_commit
 
+# libplacebo, with its git submodules (the tag commit pins their commits)
+fetch libplacebo "libplacebo v$v_libplacebo $v_libplacebo_commit" \
+	gitclone libplacebo https://code.videolan.org/videolan/libplacebo.git v$v_libplacebo $v_libplacebo_commit \
+	--recurse-submodules --shallow-submodules
+
 [ "$only" == "  " ] || exit 0
 
 # Everything below is fetched only when missing, and only by a full download.
