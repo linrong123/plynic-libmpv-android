@@ -7,6 +7,10 @@ Branches: `plynic/v0.41` builds mpv 0.41 with FFmpeg 8.1 (tags
 `v0.41.0-plynic.<n>`); `plynic/v1.1.11` is frozen and is what the 0.36-era
 `v1.1.11-plynic.1` … `.7` were built from, the rollback baseline.
 
+A pushed tag is never moved or deleted, even when its CI run fails before
+publishing anything: the fix goes out under the next number, so a tag the
+app's lock names always means one build.
+
 The iOS/macOS counterpart is
 [plynic-libmpv-darwin](https://github.com/linrong123/plynic-libmpv-darwin):
 same plynic-mpv commit, same FFmpeg commit, byte-identical
@@ -165,6 +169,59 @@ plynic version was last distributed.
 
 ## Releases
 
+### v0.41.0-plynic.rc3
+
+rc3 = rc2 + a player fix both platforms need + a Darwin-only commit
+(prerelease, not pinned by the app). FFmpeg, the dependencies and the
+flavor are unchanged.
+
+- **mpv: plynic-mpv `f226dd6356` → `c5438ee6c4`**:
+  - `player: redraw when a track selected while paused gets its subtitles`
+    (shared code). Selecting a subtitle track while paused showed nothing,
+    or a stale line, until the next change of anything whenever the
+    track's packets arrived after the one redraw that came with the switch.
+    On the Android 14 TV emulator, the PGS track of an MKV selected once per
+    run, paused, with sub-keepout never set: 8 of 30 runs on rc1 and 11 of
+    30 on rc2 ended wrong (so not the keep-out move); 30 of 30 on the fix
+    end on the right line, about 100 ms after the switch when the packets
+    were late. `tools/osd-check` (below) has it as a check: rc2 8 of 20
+    runs blank, rc3 0 of 20.
+  - Darwin only (not compiled here): `ao_coreaudio: don't set
+    kAudioOutputUnitProperty_ChannelMap` (macOS 27 refused 0.41's channel
+    map for every mono file).
+- **Correction to rc2's note on the old option name**:
+  `--vo-mediacodec-osd-sub-keepout` is an alias of the global
+  `--sub-keepout`. A value written under either name lifts the subtitles
+  on **every** VO of that mpv instance — `vo=gpu`, the render API — until it
+  is set back to 0; on the 0.36-era builds (plynic.7) the old name only ever
+  reached the OSD VO. An app that leaves the OSD VO with the band up (for
+  example falling back to `vo=gpu`) has to write 0 itself.
+- **CI**: third-party actions pinned by commit; the build job only reads
+  the repository and a separate job uploads the release; media-kit's
+  `build.yaml` (its own flavors, encoders-gpl included, on pushes to `main`
+  and on pull requests, with write access) removed.
+- **libmpv.so vs rc2**: different code in `player/` (the fix; stripped
+  arm64 19 804 080 → 19 804 160 bytes); `ao_coreaudio.c` is not compiled
+  here.
+- **Checked** on the Android 14 TV emulator and the Android 7.0 arm64
+  emulator, the rc1 list: probe with `ao=null` and `ao=audiotrack`, a second
+  instance, pause without flush, `mediacodec_embed`, `mediacodec_osd` with
+  PGS/ASS, `vo=gpu` static and switched at run time, GBK/Big5/CP1251
+  detection — same results as rc2 (the frame drops of `vo=gpu` on the
+  emulator vary from run to run on rc2 and rc3 alike); the 23-case TLS
+  matrix: verdicts, TLS log lines, SNI and handshakes identical to rc2 on
+  both.
+- **`tools/osd-check`** (new): the keep-out and paused-switch checks on
+  `vo_mediacodec_osd` over adb, with a fixture made here (black VP9, an ASS
+  and a PGS track): `build.sh` builds the harness, `run.sh <serial>
+  <libmpv.so> <label>` runs the keep-out script under both option names
+  and 20 paused switches, `judge.py` checks them (every lift clears the
+  band and moves the subtitle without changing it, 0 restores it, both
+  names give the same OSD at every step, every switch ends on the new
+  track's subtitle). On the TV emulator: rc3 passes everything; rc2 fails
+  the switches (8 of 20 blank). Needs Android 10+ (the harness), so not the
+  7.0 emulator.
+
 ### v0.41.0-plynic.rc2
 
 rc2 = rc1 + the generic subtitle keep-out band (spec 0017 T-4) + the Darwin
@@ -176,8 +233,8 @@ by the app). FFmpeg, the dependencies and the flavor are unchanged.
     band moved from `vo_mediacodec_osd` into `osd_render()`, as
     `--sub-keepout` (0–50 % of the height, `UPDATE_OSD`), so it also works
     through the render API (texture path). `--vo-mediacodec-osd-sub-keepout`
-    is an alias; the app can keep writing it, and can probe
-    `option-info/sub-keepout` for the new name.
+    is an alias of that global option, not a VO option any more: see the
+    correction under rc3 before relying on the old name.
   - Darwin only (not compiled here): `meson: enable Objective-C on every
     Darwin host`, `ao_audiounit: add --audiounit-skip-session-management`,
     `stream_file: don't ask for the file system type on iOS`.
@@ -203,12 +260,12 @@ by the app). FFmpeg, the dependencies and the flavor are unchanged.
   the same OSD updates (bounding boxes, opaque pixel counts, average colour
   of all 17) as rc1, with either option name, and redraws within 5–20 ms
   of a change while paused, as before.
-- **Known, not new**: the first redraw right after a track switch *while
-  paused* races the new track's first decoded subtitle, and nothing redraws
-  again until the next change: in 10 runs of that script on rc1 one showed
-  an older PGS line there, in 14 on rc2 three showed none (until the next
-  keep-out change); the rc1 smoke of wave 1 had the older line as well. To look at in the device matrix (spec 0017 3-6,
-  "暂停时切轨").
+- **Known, not new** (fixed in rc3): the first redraw right after a track
+  switch *while paused* races the new track's first decoded subtitle, and
+  nothing redraws again until the next change: in 10 runs of that script on
+  rc1 one showed an older PGS line there, in 14 on rc2 three showed none
+  (until the next keep-out change); the rc1 smoke of wave 1 had the older
+  line as well.
 
 ### v0.41.0-plynic.rc1
 
