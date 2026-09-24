@@ -55,7 +55,9 @@ What differs from upstream:
   unresolved symbol does not load at all on Android.
 - **Nothing of the C++ runtime is exported**: libplacebo needs the NDK's static
   libc++, which is linked in and hidden (`--exclude-libs`), as are libplacebo,
-  libiconv and uchardet themselves. `DT_NEEDED` is `libm libandroid
+  libiconv and uchardet themselves, and compiler-rt's builtins (since rc4:
+  rc1-rc3 exported their `__emutls_get_address`). The only `__` names
+  libmpv.so exports are libxml2's `__xml*`. `DT_NEEDED` is `libm libandroid
   libmediandk libdl libOpenSLES libEGL libc`; a `libc++_shared.so` there would
   keep libmpv.so from loading (the app does not ship one).
 - **Every dependency is pinned**: git sources by tag *and* commit
@@ -145,7 +147,8 @@ SHA-256) and published in each release's `manifest.json` under `deps` and
 | HarfBuzz | 11.5.1 | MIT ("Old MIT") | |
 | GNU libiconv | 1.19 | LGPL-2.1-or-later | the library only; the GPL-3.0 `iconv` program and its gnulib are never built. Default encoding set (no `--enable-extra-encodings`) |
 | uchardet | 0.0.8 | LGPL-2.1-or-later (tri-licensed MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later) | C++ without exceptions/RTTI |
-| LLVM libc++ / libc++abi / libunwind (NDK r25c, static) | — | Apache-2.0 WITH LLVM-exception | for libplacebo's C++ parts and uchardet's `operator new`/`delete`; hidden |
+| LLVM libc++ / libc++abi / libunwind, compiler-rt builtins (NDK r25c, clang 14.0.7, static) | — | Apache-2.0 WITH LLVM-exception | for libplacebo's C++ parts and uchardet's `operator new`/`delete`, and what the compiler calls (emulated TLS, integer and float helpers); hidden. From the NDK as it is, not built here |
+| zlib (NDK r25c sysroot `libz.a`) | 1.2.12 | Zlib | AOSP's `external/zlib` (zlib plus Chromium's SIMD code); FFmpeg and FreeType use it. From the NDK as it is, not built here; its API is exported from libmpv.so, as in plynic.7 and rc1-rc3 |
 
 The build scripts themselves are MIT (see `LICENSE`). The plynic patches to
 mpv are published under mpv's terms in the plynic-mpv repository, the FFmpeg
@@ -163,11 +166,68 @@ jar's other `.so` files), this repository at the tagged commit,
 SHA-256, patches of each file) and `SHA256SUMS`. `manifest.json` lists the
 same files.
 
+What libmpv.so links from the NDK as it is - zlib and the LLVM runtimes in
+the table above - has no archive here: it is the NDK's own code, whose
+source AOSP publishes. Since rc4, SOURCES.json and
+`manifest.json` record it under `static_system`: per component the version,
+licence, the NDK revision it came with, where its source is (AOSP
+`external/zlib`; AOSP `toolchain/llvm-project` at the commit the NDK's
+manifest names, and the upstream LLVM commit that is based on) and, per ABI,
+each archive's path in the NDK, SHA-256 and how many members lld took.
+`include/static-system.py` writes it after the build from lld's
+`--print-archive-stats` (`scripts/mpv.sh`), and fails the build when lld
+takes code from an archive that is neither built here nor one of those.
+For a local release: `collect-sources.sh <dir>`, the build, then
+`include/static-system.py <dir> sdk/android-sdk-linux/ndk/<v_ndk>
+prefix/*/libmpv.archive-stats.tsv`.
+
 Retention: a release that any published plynic version pinned is never
 deleted, and its source stays available for at least three years after that
 plynic version was last distributed.
 
 ## Releases
+
+### v0.41.0-plynic.rc4
+
+rc4 = rc3 + an upstream fix both platforms build, compiler-rt's builtins
+hidden, and SOURCES.json complete (prerelease, not pinned by the app).
+FFmpeg, the dependencies and the flavor are unchanged.
+
+- **mpv: plynic-mpv `c5438ee6c4` → `d75b92b584`**: `screenshot: correctly
+  detect hardware frame` (upstream `c66204b69b`, cherry-picked). mpv 0.41's
+  `9b1d47ece1` gives a hardware image the descriptor of its software
+  sub-format, so `screenshot-raw` stopped downloading VideoToolbox frames and
+  handed them to libswscale: on iOS and macOS no screenshot of a
+  hardware-decoded frame through the render API. On Android nothing
+  changes: MediaCodec surface frames (`hwdec=mediacodec`) have no frames
+  context, so they kept the hardware descriptor, and a screenshot of them
+  fails as it always has (plynic.7, rc3 and rc4 alike: the picture is in a
+  Surface, there is nothing to download); with `mediacodec-copy` or software
+  decoding `screenshot-raw video` returns the picture in bgr0 and rgba64 on
+  rc3 and rc4 alike (TV emulator, `vo=gpu`).
+- **`__emutls_get_address` is no longer exported**: compiler-rt's builtins
+  archive, which the clang driver adds to every link, joins the
+  `--exclude-libs` list (libc++abi's per-thread exception state is
+  `thread_local`, emulated TLS below API 29). Against rc3 each ABI exports
+  exactly that one symbol fewer (arm64 9087 → 9086, armeabi-v7a 8690 → 8689,
+  x86 7785 → 7784, x86_64 8207 → 8206); `DT_NEEDED` is unchanged. A consumer
+  that tolerated it as a known runtime export can drop that exception.
+- **SOURCES.json and manifest.json: `static_system`** — zlib 1.2.12 (the NDK
+  sysroot's `libz.a`), and clang 14.0.7's libc++/libc++abi, libunwind and
+  builtins, with where their source is and per ABI the archives' SHA-256
+  and the members lld took (see [Corresponding source](#corresponding-source)).
+  `sources` and the archives keep their shape.
+- **libmpv.so vs rc3**: the mpv fix, the builtins' symbols hidden, and the
+  configuration string mpv embeds (it quotes the link arguments); stripped
+  sizes within 2 KB of rc3 on every ABI.
+- **Checked** on the Android 14 TV emulator and the Android 7.0 arm64
+  emulator, the rc1 list (probe with `ao=null` and `ao=audiotrack`, a second
+  instance, pause without flush, `mediacodec_embed`, `mediacodec_osd` with
+  PGS/ASS, `vo=gpu` static and switched at run time, GBK/Big5/CP1251
+  detection): same results as rc3; the 23-case TLS matrix: verdicts, TLS
+  log lines, SNI and handshakes identical to rc3 on both; `tools/osd-check`
+  on the TV emulator: keep-out under both names and 20 of 20 paused
+  switches pass; the screenshots above.
 
 ### v0.41.0-plynic.rc3
 
