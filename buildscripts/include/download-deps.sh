@@ -126,6 +126,12 @@ fetch libplacebo "libplacebo v$v_libplacebo $v_libplacebo_commit" \
 
 # Everything below is fetched only when missing, and only by a full download.
 
+# The encoders-gpl flavor's own dependencies (encoders, GPL; the same test as
+# depinfo.sh's dependency tree). No other flavor builds them, so a plynic
+# build does not fetch them: the unpinned x264 clone from code.videolan.org
+# failed the rc2 CI run although nothing uses it.
+if [ -n "${ENCODERS_GPL+x}" ]; then
+
 # libogg
 [ ! -d libogg ] && $WGET https://github.com/xiph/ogg/releases/download/v${v_libogg}/libogg-${v_libogg}.tar.gz && tar -xf libogg-${v_libogg}.tar.gz && mv libogg-${v_libogg} libogg && rm libogg-${v_libogg}.tar.gz
 
@@ -138,6 +144,12 @@ fetch libplacebo "libplacebo v$v_libplacebo $v_libplacebo_commit" \
 # libx264
 [ ! -d libx264 ] && git clone --depth 1 https://code.videolan.org/videolan/x264.git --branch master libx264
 
+# fftools_ffi
+[ ! -d fftools_ffi ] && git clone https://github.com/moffatman/fftools-ffi.git fftools_ffi && cd fftools_ffi && git reset --hard 9b0d4da026d9c830702ec043c1f1f98d407025af && cd ..
+
+true # an already present dir above must not end the if with a failure
+fi
+
 # shaderc
 mkdir -p shaderc
 cat >shaderc/README <<'HEREDOC'
@@ -148,9 +160,6 @@ HEREDOC
 # mpv (never re-fetched: locally deps/mpv is a symlink to the plynic-mpv fork's
 # working tree, see plynic-build.sh)
 [ ! -d mpv ] && git clone $v_mpv_repo mpv && cd mpv && git reset --hard $v_mpv && cd ..
-
-# fftools_ffi
-[ ! -d fftools_ffi ] && git clone https://github.com/moffatman/fftools-ffi.git fftools_ffi && cd fftools_ffi && git reset --hard 9b0d4da026d9c830702ec043c1f1f98d407025af && cd ..
 
 # media-kit-android-helper
 [ ! -d media-kit-android-helper ] && git clone --branch main https://github.com/media-kit/media-kit-android-helper.git && cd media-kit-android-helper && git reset --hard $v_mkhelper_commit && cd ..

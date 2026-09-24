@@ -185,7 +185,10 @@ by the app). FFmpeg, the dependencies and the flavor are unchanged.
   (`videolan/dav1d`, `haasn/libplacebo`) when code.videolan.org cannot be
   cloned; the pinned commit is checked either way, so the sources are the
   same (the first three CI runs of the rc2 tag failed on "Connection refused" from
-  code.videolan.org).
+  code.videolan.org). The encoders-gpl flavor's own dependencies (x264,
+  libvpx, libvorbis, libogg, fftools-ffi) are fetched only for that flavor
+  (`ENCODERS_GPL`); a plynic build never used them, and the unpinned x264
+  clone was the next thing to fail.
 - **libmpv.so vs a build without the Darwin commits**: identical except the
   version string and one assert message (`stream_file.c:278` → `:286`); two
   builds of the same commit are byte-identical.
