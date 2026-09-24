@@ -55,11 +55,17 @@ What differs from upstream:
   unresolved symbol does not load at all on Android.
 - **Nothing of the C++ runtime is exported**: libplacebo needs the NDK's static
   libc++, which is linked in and hidden (`--exclude-libs`), as are libplacebo,
-  libiconv and uchardet themselves, and compiler-rt's builtins (since rc4:
+  libiconv, uchardet and zlib themselves, and compiler-rt's builtins (since rc4:
   rc1-rc3 exported their `__emutls_get_address`). The only `__` names
   libmpv.so exports are libxml2's `__xml*`. `DT_NEEDED` is `libm libandroid
   libmediandk libdl libOpenSLES libEGL libc`; a `libc++_shared.so` there would
-  keep libmpv.so from loading (the app does not ship one).
+  keep libmpv.so from loading (the app does not ship one). The jar's other
+  library, `libmediakitandroidhelper.so` (media-kit-android-helper, unchanged
+  source), is built with the same NDK and exports only its own API, 12
+  symbols (since rc5, see below).
+- **zlib is built here** from its signed release tarball (`scripts/zlib.sh`,
+  since rc5), not taken from the NDK sysroot, so every library in libmpv.so
+  has a pinned, published source.
 - **Every dependency is pinned**: git sources by tag *and* commit
   (`download-deps.sh` refuses a moved tag), tarballs by SHA-256.
 - **The complete corresponding source is published with every release**
@@ -147,8 +153,19 @@ SHA-256) and published in each release's `manifest.json` under `deps` and
 | HarfBuzz | 11.5.1 | MIT ("Old MIT") | |
 | GNU libiconv | 1.19 | LGPL-2.1-or-later | the library only; the GPL-3.0 `iconv` program and its gnulib are never built. Default encoding set (no `--enable-extra-encodings`) |
 | uchardet | 0.0.8 | LGPL-2.1-or-later (tri-licensed MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later) | C++ without exceptions/RTTI |
-| LLVM libc++ / libc++abi / libunwind, compiler-rt builtins (NDK r25c, clang 14.0.7, static) | — | Apache-2.0 WITH LLVM-exception | for libplacebo's C++ parts and uchardet's `operator new`/`delete`, and what the compiler calls (emulated TLS, integer and float helpers); hidden. From the NDK as it is, not built here |
-| zlib (NDK r25c sysroot `libz.a`) | 1.2.12 | Zlib | AOSP's `external/zlib` (zlib plus Chromium's SIMD code); FFmpeg and FreeType use it. From the NDK as it is, not built here; its API is exported from libmpv.so, as in plynic.7 and rc1-rc3 |
+| zlib | 1.3.2 | Zlib | release tarball (signed by Mark Adler, key `5ED46A67 21D36558 7791E2AA 783FCD8E 58BCAFBA`), `libz.a` only; FFmpeg (PNG, compressed MKV tracks, HTTP gzip), FreeType (gzip fonts) and mpv (MKV header compression) use it; hidden. rc1-rc4 and plynic.7 linked the NDK sysroot's `libz.a` (1.2.12 with AOSP's changes) and exported its API |
+| LLVM libc++ / libc++abi / libunwind, compiler-rt builtins (NDK r25c, clang 14.0.7, static) | — | Apache-2.0 WITH LLVM-exception | for libplacebo's C++ parts and uchardet's `operator new`/`delete`, and what the compiler calls (emulated TLS, integer and float helpers); hidden. From the NDK as it is, not built here. The helper links the same runtime, also hidden |
+
+`libmediakitandroidhelper.so`, the jar's second library, is
+[media-kit-android-helper](https://github.com/media-kit/media-kit-android-helper)
+at `v_mkhelper_commit` (MIT), built by its own Gradle project as it is. What
+plynic changes comes from outside its tree (`bundle_plynic.sh` passes
+`include/helper.init.gradle` and `include/helper.cmake`): the NDK is
+`v_ndk` (the Android Gradle Plugin's default was NDK r26 up to rc4), its
+code is compiled with `-fvisibility=hidden` and linked with
+`--exclude-libs,ALL`, so it exports its 7 `MediaKitAndroidHelper*` functions
+and 5 JNI natives and nothing of the static C++ runtime, and lld writes its
+archive statistics for `static_system`.
 
 The build scripts themselves are MIT (see `LICENSE`). The plynic patches to
 mpv are published under mpv's terms in the plynic-mpv repository, the FFmpeg
@@ -166,20 +183,28 @@ jar's other `.so` files), this repository at the tagged commit,
 SHA-256, patches of each file) and `SHA256SUMS`. `manifest.json` lists the
 same files.
 
-What libmpv.so links from the NDK as it is - zlib and the LLVM runtimes in
-the table above - has no archive here: it is the NDK's own code, whose
-source AOSP publishes. Since rc4, SOURCES.json and
-`manifest.json` record it under `static_system`: per component the version,
-licence, the NDK revision it came with, where its source is (AOSP
-`external/zlib`; AOSP `toolchain/llvm-project` at the commit the NDK's
-manifest names, and the upstream LLVM commit that is based on) and, per ABI,
-each archive's path in the NDK, SHA-256 and how many members lld took.
-`include/static-system.py` writes it after the build from lld's
-`--print-archive-stats` (`scripts/mpv.sh`), and fails the build when lld
-takes code from an archive that is neither built here nor one of those.
-For a local release: `collect-sources.sh <dir>`, the build, then
-`include/static-system.py <dir> sdk/android-sdk-linux/ndk/<v_ndk>
-prefix/*/libmpv.archive-stats.tsv`.
+What the jar's two libraries link from the NDK as it is - the LLVM runtime
+in the table above - has no archive here: it is the NDK's own code, whose
+source AOSP publishes. SOURCES.json and `manifest.json` record it under
+`static_system` (since rc4; per binary since rc5): per component the
+version, licence, the NDK revision it came with, where its source is (AOSP
+`toolchain/llvm-project` at the commit the NDK's manifest names, and the
+upstream LLVM commit that is based on), whether anything of it is exported,
+and per binary (`libmpv.so`, `libmediakitandroidhelper.so`) and ABI each
+archive's path in the NDK, SHA-256, how many members lld took and how many
+of its definitions the binary exports (counted in its dynamic symbol table).
+`binaries` records per binary and ABI the NDK, the compilers its `.comment`
+section names, the linker and the number of exported symbols.
+`include/static-system.py` writes both after the build from lld's
+`--print-archive-stats` (`scripts/mpv.sh`, `include/helper.cmake`) and the
+binaries themselves, and fails the build when lld takes code from an NDK
+archive other than those (the sysroot's `libz.a` included), when a binary
+exports any of it, or when a binary was compiled or linked by another clang
+than the NDK's.
+For a local release: `collect-sources.sh <dir>`, the build, the helper
+(`bundle_plynic.sh` has the Gradle line), then `include/static-system.py
+<dir> sdk/android-sdk-linux/ndk/<v_ndk> prefix/<abi>/libmpv.archive-stats.tsv=prefix/<abi>/lib/libmpv.so
+prefix/<abi>/libmediakitandroidhelper.archive-stats.tsv=<apk>/lib/<abi>/libmediakitandroidhelper.so ...`.
 
 Retention: a release that any published plynic version pinned is never
 deleted, and its source stays available for at least three years after that
@@ -187,10 +212,74 @@ plynic version was last distributed.
 
 ## Releases
 
+### v0.41.0-plynic.rc5
+
+rc5 = rc4 with the jar's second library and zlib under the same rules as
+everything else in it (prerelease, not pinned by the app). mpv (plynic-mpv
+`d75b92b584`, as rc4), FFmpeg, the other dependencies and the flavor's
+features are unchanged.
+
+- **zlib 1.3.2, built here** (`scripts/zlib.sh`; the release tarball, pinned
+  by SHA-256, signed by Mark Adler) instead of the NDK sysroot's `libz.a`:
+  1.2.12 with AOSP's changes, compiled by the platform build's clang 15.0.1,
+  with no revision in the NDK to say which source it was. Its source is in
+  `sources/` (`zlib-1.3.2.tar.xz`, byte-identical with upstream's).
+  FFmpeg (`--enable-zlib`, autodetected before), FreeType (`-Dzlib=system`)
+  and mpv (`-Dzlib=enabled`) now fail to configure without it.
+- **zlib is hidden in libmpv.so**: against rc4 each ABI exports exactly
+  zlib's 53 API names fewer (`inflate*`, `deflate*`, `crc32*`, `adler32*`,
+  `compress`-family, `zlibVersion`, ...) and nothing else changes: arm64
+  9086 → 9033, armeabi-v7a 8689 → 8636, x86 7784 → 7731, x86_64 8206 → 8153.
+  `DT_NEEDED` unchanged. Anything that called zlib through libmpv.so (the
+  app does not) has to bring its own.
+- **libmediakitandroidhelper.so** (media-kit-android-helper `42054e5`, the
+  source unchanged): built with NDK r25c like libmpv.so instead of the
+  Android Gradle Plugin's default r26 (clang 17.0.2), and exports 12 symbols
+  (the 7 `MediaKitAndroidHelper*` functions, the 5 JNI natives) instead of
+  about 700 (its static C++ runtime: `std::`, `__cxa_*`,
+  `__gxx_personality_v0`, `__emutls_get_address`). Stripped arm64 386 696 →
+  213 936 bytes, armeabi-v7a 286 812 → 104 780. See
+  [Dependencies](#dependencies).
+- **`static_system` per binary, exports counted**: SOURCES.json and
+  manifest.json record the LLVM runtime per binary and ABI, both libraries,
+  with each archive's exported definitions counted in the binary's dynamic
+  symbol table (0 everywhere); new `binaries` (NDK, compilers, linker,
+  export count per binary and ABI); manifest.json gets `deps.zlib` and, per
+  ABI, `helper` (digests, build-id, `DT_NEEDED`). The build now fails on an
+  unclassified or refused NDK archive (the sysroot's `libz.a`), on any
+  exported runtime symbol, and on a binary compiled or linked by another
+  clang than the NDK's.
+- **Correction to rc4's notes**: rc4's `static_system` covered libmpv.so
+  only (not the helper, NDK r26 with its C++ runtime exported), and its
+  zlib entry named a version but no source revision; "SOURCES.json
+  complete" did not hold.
+- **libmpv.so vs rc4**: zlib 1.3.2 (hidden) for the NDK's 1.2.12
+  (exported); the rest is the same code, and the configuration string mpv
+  embeds shows the new link arguments. Stripped sizes: arm64 −5.7 KB,
+  armeabi-v7a +16 KB, x86 +1 KB, x86_64 −4 KB.
+- **Checked** on the Android 14 TV emulator and the Android 7.0 arm64
+  emulator: the rc1 list (probe with `ao=null` and `ao=audiotrack`, a second
+  instance, pause without flush, `mediacodec_embed`, `mediacodec_osd` with
+  PGS/ASS, `vo=gpu` static and switched at run time, GBK/Big5/CP1251
+  detection) with the same results as rc4; the 23-case TLS matrix:
+  verdicts, TLS log lines, SNI and handshakes identical to rc4 on both;
+  `tools/osd-check`: keep-out under both names and 20 of 20 paused
+  switches pass; `screenshot-raw` as in rc4 (`mediacodec-copy` and software
+  decoding return the picture, MediaCodec surface frames do not); zlib
+  itself: a PNG `screenshot-to-file` (compression 9) is valid and decodes
+  back through FFmpeg's PNG decoder. The helper (arm64), in an
+  `app_process` harness with a stand-in Context on both emulators, rc4's
+  and rc5's alike: the JNI natives,
+  `setApplicationContext`, asset copy, and the 7 C functions through
+  `dlsym` (JavaVM, files dir, emulator flag, API level, asset copy,
+  `OpenFileDescriptor` of a `file://` URI through the Java callback, close)
+  all pass; rc5 exports none of the runtime names rc4 did.
+
 ### v0.41.0-plynic.rc4
 
 rc4 = rc3 + an upstream fix both platforms build, compiler-rt's builtins
-hidden, and SOURCES.json complete (prerelease, not pinned by the app).
+hidden, and SOURCES.json complete (prerelease, not pinned by the app;
+"complete" did not hold, see the correction under rc5).
 FFmpeg, the dependencies and the flavor are unchanged.
 
 - **mpv: plynic-mpv `c5438ee6c4` → `d75b92b584`**: `screenshot: correctly
