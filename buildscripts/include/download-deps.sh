@@ -96,6 +96,10 @@ fetch libiconv "libiconv-$v_libiconv.tar.gz $v_libiconv_sha256" \
 fetch uchardet "uchardet-$v_uchardet.tar.xz $v_uchardet_sha256" \
 	tarball uchardet https://www.freedesktop.org/software/uchardet/releases/uchardet-$v_uchardet.tar.xz $v_uchardet_sha256
 
+# zlib (release tarball, signed by Mark Adler; see scripts/zlib.sh)
+fetch zlib "zlib-$v_zlib.tar.xz $v_zlib_sha256" \
+	tarball zlib https://github.com/madler/zlib/releases/download/v$v_zlib/zlib-$v_zlib.tar.xz $v_zlib_sha256
+
 # ffmpeg
 fetch ffmpeg "ffmpeg n$v_ffmpeg $v_ffmpeg_commit" \
 	gitclone ffmpeg https://github.com/FFmpeg/FFmpeg.git n$v_ffmpeg $v_ffmpeg_commit

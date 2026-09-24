@@ -64,10 +64,17 @@ unset CC CXX # meson wants these unset
 # that archive. rc1-rc3 exported it from libmpv.so on every ABI. The four
 # names cover the four ABIs; lld ignores the ones not on the link line.
 #
+# zlib (scripts/zlib.sh, since rc5; the NDK sysroot's libz.a before) is
+# hidden too: libmpv's own users (FFmpeg, FreeType, mpv) bind to it at link
+# time, and nothing outside libmpv.so needs its API. rc1-rc4 and plynic.7
+# exported the NDK copy's inflate/deflate/crc32/... from libmpv.so.
+# -Dzlib=enabled: mpv's MKV header decompression (demux_mkv) needs it; a
+# missing zlib fails the build.
+#
 # --print-archive-stats: how many members lld took from each static archive.
 # include/static-system.py reads it after the build to record, in
-# SOURCES.json, the libraries libmpv.so gets from the NDK itself (zlib, the
-# LLVM runtimes), and refuses one it does not know.
+# SOURCES.json, the libraries libmpv.so gets from the NDK itself (the LLVM
+# runtimes), and refuses one it does not know.
 #
 # --no-undefined: mpv's meson.build sets b_lundef=false, so a symbol nothing
 # on the link line defines used to become a silent dynamic import. On Android
@@ -75,10 +82,10 @@ unset CC CXX # meson wants these unset
 # uchardet link did exactly that (async_safe_fatal_no_abort, from the NDK's
 # static libstdc++.a; see scripts/uchardet.sh). Every import now has to
 # resolve against the API-level stubs of the NEEDED libraries at link time.
-for f in lib/libiconv.a include/iconv.h lib/pkgconfig/uchardet.pc lib/pkgconfig/libplacebo.pc; do
+for f in lib/libiconv.a include/iconv.h lib/pkgconfig/uchardet.pc lib/pkgconfig/libplacebo.pc lib/pkgconfig/zlib.pc; do
 	[ -e "$prefix_dir/$f" ] && continue
-	echo "mpv: $prefix_dir/$f is missing; build libiconv, uchardet and libplacebo first" \
-		"(plynic-build.sh without --mpv-only, or --only libiconv,uchardet,libplacebo)" >&2
+	echo "mpv: $prefix_dir/$f is missing; build zlib, libiconv, uchardet and libplacebo first" \
+		"(plynic-build.sh without --mpv-only, or --only zlib,...,libiconv,uchardet,libplacebo,mpv)" >&2
 	exit 1
 done
 
@@ -116,6 +123,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
  	-Dcplayer=false \
 	-Diconv=enabled \
 	-Duchardet=enabled \
+	-Dzlib=enabled \
 	-Dvulkan=disabled \
 	-Daudiotrack=enabled \
 	-Dopensles=enabled \
@@ -125,7 +133,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
  	-Dmanpage-build=disabled \
 	-Dbuild-date=false \
 	-Dc_args="-I$prefix_dir/include" \
-	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libiconv.a:libuchardet.a:libplacebo.a:libc++_static.a:libc++abi.a:libunwind.a:libclang_rt.builtins-aarch64-android.a:libclang_rt.builtins-arm-android.a:libclang_rt.builtins-i686-android.a:libclang_rt.builtins-x86_64-android.a -Wl,--print-archive-stats=$prefix_dir/libmpv.archive-stats.tsv -Wl,--no-undefined -Wl,--build-id=sha1"
+	-Dc_link_args="$LDFLAGS -L$prefix_dir/lib -liconv -Wl,--exclude-libs,libz.a:libiconv.a:libuchardet.a:libplacebo.a:libc++_static.a:libc++abi.a:libunwind.a:libclang_rt.builtins-aarch64-android.a:libclang_rt.builtins-arm-android.a:libclang_rt.builtins-i686-android.a:libclang_rt.builtins-x86_64-android.a -Wl,--print-archive-stats=$prefix_dir/libmpv.archive-stats.tsv -Wl,--no-undefined -Wl,--build-id=sha1"
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install

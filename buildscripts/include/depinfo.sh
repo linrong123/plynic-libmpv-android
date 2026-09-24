@@ -33,6 +33,13 @@ v_libiconv=1.19
 v_libiconv_sha256=88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6
 v_uchardet=0.0.8
 v_uchardet_sha256=e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0
+# zlib (FFmpeg, FreeType, mpv's MKV decompression): built here from the
+# release tarball (signed by Mark Adler, key 5ED46A67 21D36558 7791E2AA
+# 783FCD8E 58BCAFBA), not the NDK sysroot's libz.a. That one was zlib
+# 1.2.12 with AOSP's changes and no revision to pin it to, so a release could
+# not say which source it shipped; see scripts/zlib.sh.
+v_zlib=1.3.2
+v_zlib_sha256=d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3
 v_ffmpeg=8.1.3
 v_ffmpeg_commit=1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7
 # libplacebo: mpv 0.41 requires it (vo=gpu links its colour/shader helpers).
@@ -58,13 +65,14 @@ v_libvpx=1.13
 
 dep_mbedtls=()
 dep_dav1d=()
+dep_zlib=()
 dep_libvorbis=(libogg)
 if [ -n "${ENCODERS_GPL+x}" ]; then
-	dep_ffmpeg=(mbedtls dav1d libxml2 libvorbis libvpx libx264)
+	dep_ffmpeg=(mbedtls dav1d libxml2 zlib libvorbis libvpx libx264)
 else
-	dep_ffmpeg=(mbedtls dav1d libxml2)
+	dep_ffmpeg=(mbedtls dav1d libxml2 zlib)
 fi
-dep_freetype2=()
+dep_freetype=(zlib)
 dep_fribidi=()
 dep_harfbuzz=()
 dep_libass=(freetype fribidi harfbuzz)
@@ -74,7 +82,7 @@ dep_uchardet=()
 dep_lua=()
 dep_shaderc=()
 if [ -n "${ENCODERS_GPL+x}" ]; then
-	dep_mpv=(ffmpeg libass libplacebo libiconv uchardet fftools_ffi)
+	dep_mpv=(zlib ffmpeg libass libplacebo libiconv uchardet fftools_ffi)
 else
-	dep_mpv=(ffmpeg libass libplacebo libiconv uchardet)
+	dep_mpv=(zlib ffmpeg libass libplacebo libiconv uchardet)
 fi

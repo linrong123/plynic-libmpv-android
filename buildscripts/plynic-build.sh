@@ -21,7 +21,8 @@
 # build order, against the prefix, e.g. after a version bump of one
 # dependency: --only dav1d,ffmpeg,mpv.
 # Static libraries are linked into libmpv.so, so mpv has to be in the list for
-# a rebuilt dependency to reach it; ffmpeg has to follow mbedtls or dav1d.
+# a rebuilt dependency to reach it; ffmpeg has to follow mbedtls, dav1d or
+# zlib, and freetype zlib.
 set -u
 cd "$(dirname "$0")"
 export TRAVIS=1
@@ -45,7 +46,7 @@ done
 [ ${#archs[@]} -eq 0 ] && archs=(arm64)
 [ -f "flavors/$flavor.sh" ] || { echo "no such flavor: $flavor" >&2; exit 2; }
 
-all_targets=(mbedtls dav1d libxml2 ffmpeg freetype fribidi harfbuzz libass libiconv uchardet libplacebo mpv)
+all_targets=(mbedtls dav1d libxml2 zlib ffmpeg freetype fribidi harfbuzz libass libiconv uchardet libplacebo mpv)
 targets=("${all_targets[@]}")
 [ $mpv_only -eq 1 ] && only=mpv
 if [ -n "$only" ]; then

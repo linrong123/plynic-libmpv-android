@@ -14,8 +14,8 @@
 #                                (libplacebo) at the commits it pins; the
 #                                files as git has them, no .git, no build dirs
 #   <upstream tarball>           a dependency fetched as a release tarball
-#                                (mbedtls, libiconv, uchardet): the very file
-#                                upstream publishes, same sha256
+#                                (mbedtls, libiconv, uchardet, zlib): the very
+#                                file upstream publishes, same sha256
 #   src-mpv-<sha9>.tar.xz        the plynic-mpv fork at v_mpv (its patches are
 #                                commits there)
 #   patches-<tag>.tar.xz         buildscripts/patches: applied to the trees
@@ -30,8 +30,8 @@
 #                                digest, sha256, size, patches applied;
 #                                after the build, include/static-system.py
 #                                adds "static_system": what libmpv.so links
-#                                from the NDK as it is (zlib, the LLVM
-#                                runtimes), with no archive here
+#                                from the NDK as it is (the LLVM runtimes),
+#                                with no archive here
 #   SHA256SUMS                   sha256sum -c format
 #
 # Archives are deterministic for a given git and xz: git archive stamps
@@ -94,10 +94,10 @@ copy () {
 need () {
 	[ -e "deps/$1" ] || { echo "deps/$1 is missing: run include/download-deps.sh first" >&2; exit 1; }
 }
-for d in mbedtls dav1d libxml2 libiconv uchardet ffmpeg freetype fribidi harfbuzz libass libplacebo mpv media-kit-android-helper; do
+for d in mbedtls dav1d libxml2 libiconv uchardet zlib ffmpeg freetype fribidi harfbuzz libass libplacebo mpv media-kit-android-helper; do
 	need "$d"
 done
-for t in "mbedtls-$v_mbedtls.tar.bz2" "libiconv-$v_libiconv.tar.gz" "uchardet-$v_uchardet.tar.xz"; do
+for t in "mbedtls-$v_mbedtls.tar.bz2" "libiconv-$v_libiconv.tar.gz" "uchardet-$v_uchardet.tar.xz" "zlib-$v_zlib.tar.xz"; do
 	[ -f "deps/.tarballs/$t" ] || { echo "deps/.tarballs/$t is missing: fetch it again (rm -rf deps/${t%%-*})" >&2; exit 1; }
 done
 
@@ -134,6 +134,7 @@ gitsrc media-kit-android-helper "${v_mkhelper_commit:0:9}" deps/media-kit-androi
 copy "mbedtls-$v_mbedtls.tar.bz2"
 copy "libiconv-$v_libiconv.tar.gz"
 copy "uchardet-$v_uchardet.tar.xz"
+copy "zlib-$v_zlib.tar.xz"
 
 # The patches, and this repository itself (git archive of HEAD: a local
 # build with uncommitted changes says so in the file name).
@@ -221,6 +222,12 @@ add("libiconv-$v_libiconv.tar.gz", "libiconv", "$v_libiconv", "LGPL-2.1-or-later
 add("uchardet-$v_uchardet.tar.xz", "uchardet", "$v_uchardet", "MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later",
     "https://www.freedesktop.org/software/uchardet/releases/uchardet-$v_uchardet.tar.xz",
     upstream_sha256="$v_uchardet_sha256", note="upstream release tarball as published; used under LGPL-2.1-or-later")
+add("zlib-$v_zlib.tar.xz", "zlib", "$v_zlib", "Zlib",
+    "https://github.com/madler/zlib/releases/download/v$v_zlib/zlib-$v_zlib.tar.xz",
+    upstream_sha256="$v_zlib_sha256",
+    note="upstream release tarball as published (also on zlib.net, same sha256; signed by Mark Adler, "
+         "OpenPGP key 5ED46A6721D365587791E2AA783FCD8E58BCAFBA); only libz.a is built (scripts/zlib.sh), "
+         "hidden in libmpv.so")
 add(f"patches-{tag}.tar.xz", "patches", tag, "LGPL-3.0-or-later", "",
     note="buildscripts/patches, applied by patch.sh in file name order; under the terms of the FFmpeg "
          "code they change. upstream_*.patch are FFmpeg's own commits (git format-patch), backported")

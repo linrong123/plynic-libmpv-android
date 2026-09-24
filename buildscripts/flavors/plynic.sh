@@ -27,6 +27,10 @@
 # keeps decoding in FFmpeg exactly as before (mpv would not pick them by
 # default, but a decoder that is not there cannot be picked by accident).
 #
+# --enable-zlib: zlib is built here (scripts/zlib.sh) and FFmpeg finds it in
+# the prefix. Autodetected before; now a missing zlib fails configure instead
+# of silently dropping the PNG decoder, compressed MKV tracks and HTTP gzip.
+#
 # --enable-small is kept for now (spec 0017 TD7): it builds FFmpeg with -Os,
 # which may slow down the pure-C software decoders (RV60, Hi10P) on 32-bit
 # TVs. Dropping it waits for an -Os/-O3 comparison on such a device.
@@ -102,6 +106,8 @@ cpuflags=
 	--enable-runtime-cpudetect \
 	\
 	--enable-mbedtls \
+	\
+	--enable-zlib \
 	\
 	--enable-libdav1d \
 	\
