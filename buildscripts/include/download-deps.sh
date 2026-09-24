@@ -52,14 +52,21 @@ tarball () {
 	tar -xf "$file" -C "$dir" --strip-components=1
 }
 
-# gitclone <dir> <url> <tag> <commit> [git clone options...]: shallow clone of
-#   <tag>, refused unless its HEAD is <commit>. A tag can be moved or
-#   recreated upstream; the commit is what the release was built and its
-#   sources published from (collect-sources.sh).
+# gitclone <dir> "<url> [<mirror>...]" <tag> <commit> [git clone options...]:
+#   shallow clone of <tag>, refused unless its HEAD is <commit>. A tag can be
+#   moved or recreated upstream; the commit is what the release was built and
+#   its sources published from (collect-sources.sh). A mirror is only tried
+#   when the upstream cannot be cloned (code.videolan.org refused connections
+#   from CI for hours), and must yield the same commit.
 gitclone () {
-	local dir=$1 url=$2 tag=$3 want=$4 got
+	local dir=$1 urls=$2 tag=$3 want=$4 got url
 	shift 4
-	git -c advice.detachedHead=false clone --depth 1 --branch "$tag" "$@" "$url" "$dir"
+	for url in $urls; do
+		rm -rf "$dir"
+		git -c advice.detachedHead=false clone --depth 1 --branch "$tag" "$@" "$url" "$dir" && break
+		echo "$dir: could not clone $url" >&2
+	done
+	[ -d "$dir" ] || return 1
 	got=$(git -C "$dir" rev-parse HEAD)
 	if [ "$got" != "$want" ]; then
 		echo "$dir: tag $tag is commit $got, expected $want" >&2
@@ -74,7 +81,8 @@ fetch mbedtls "mbedtls-$v_mbedtls.tar.bz2 $v_mbedtls_sha256" \
 
 # dav1d
 fetch dav1d "dav1d $v_dav1d $v_dav1d_commit" \
-	gitclone dav1d https://code.videolan.org/videolan/dav1d.git $v_dav1d $v_dav1d_commit
+	gitclone dav1d "https://code.videolan.org/videolan/dav1d.git https://github.com/videolan/dav1d.git" \
+	$v_dav1d $v_dav1d_commit
 
 # libxml2
 fetch libxml2 "libxml2 v$v_libxml2 $v_libxml2_commit" \
@@ -110,7 +118,8 @@ fetch libass "libass $v_libass $v_libass_commit" \
 
 # libplacebo, with its git submodules (the tag commit pins their commits)
 fetch libplacebo "libplacebo v$v_libplacebo $v_libplacebo_commit" \
-	gitclone libplacebo https://code.videolan.org/videolan/libplacebo.git v$v_libplacebo $v_libplacebo_commit \
+	gitclone libplacebo "https://code.videolan.org/videolan/libplacebo.git https://github.com/haasn/libplacebo.git" \
+	v$v_libplacebo $v_libplacebo_commit \
 	--recurse-submodules --shallow-submodules
 
 [ "$only" == "  " ] || exit 0

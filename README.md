@@ -181,6 +181,11 @@ by the app). FFmpeg, the dependencies and the flavor are unchanged.
   - Darwin only (not compiled here): `meson: enable Objective-C on every
     Darwin host`, `ao_audiounit: add --audiounit-skip-session-management`,
     `stream_file: don't ask for the file system type on iOS`.
+- **Fetching**: dav1d and libplacebo fall back to their GitHub mirrors
+  (`videolan/dav1d`, `haasn/libplacebo`) when code.videolan.org cannot be
+  cloned; the pinned commit is checked either way, so the sources are the
+  same (the first three CI runs of the rc2 tag failed on "Connection refused" from
+  code.videolan.org).
 - **libmpv.so vs a build without the Darwin commits**: identical except the
   version string and one assert message (`stream_file.c:278` → `:286`); two
   builds of the same commit are byte-identical.
