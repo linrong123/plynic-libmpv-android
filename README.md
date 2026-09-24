@@ -47,9 +47,26 @@ tls: tls_mbedtls: certificate verify failed: flags=0x5 (BADCERT_EXPIRED|BADCERT_
 tls: mbedtls_ssl_handshake returned -0x2700
 ```
 
-- The second line is FFmpeg's own and unchanged
-  (`MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`); a parser that only knows it keeps
-  working.
+- The second line is FFmpeg's own, and it depends on the FFmpeg version.
+  FFmpeg 6.0 verifies with `MBEDTLS_SSL_VERIFY_REQUIRED`, so the handshake
+  itself fails and it prints `tls: mbedtls_ssl_handshake returned -0x2700`
+  (`MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`, the `default` case, above).
+  FFmpeg 8.1 verifies with `MBEDTLS_SSL_VERIFY_OPTIONAL` (n8.1.3
+  `tls_mbedtls.c:633-635`): mbedtls then lets the handshake succeed, and the
+  check after the handshake (`tls_handshake` and `tls_open`, `:486-495` and
+  `:687-695`) prints
+  `tls: mbedtls_ssl_get_verify_result reported problems with the certificate verification, returned flags: <decimal>`,
+  followed, for `BADCERT_NOT_TRUSTED`, by
+  `tls: The certificate is not correctly signed by the trusted CA.`.
+  (8.1's `handle_handshake_error` has a `Certificate verification failed.`
+  case, but under `VERIFY_OPTIONAL` it is never reached. Measured with
+  FFmpeg n8.1.2 + mbedtls on macOS: expired, wrong host, untrusted and
+  not-yet-valid certificates give flags 1, 4, 8 and 512, and that line never
+  appears.) Parse the first
+  line; a parser that also accepts FFmpeg's line must accept both versions'
+  texts, or it goes blind when the engine moves from one FFmpeg to the other.
+  A port of this patch to 8.1 has to print the first line in that
+  post-handshake check, not in `handle_handshake_error`.
 - `flags` is `mbedtls_ssl_get_verify_result()` in lowercase hex, no padding.
   Regular expression for the first line:
   `^tls: tls_mbedtls: certificate verify failed: flags=0x([0-9a-f]+) \(([A-Z0-9_|]*)\)$`
