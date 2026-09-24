@@ -7,6 +7,13 @@ Branches: `plynic/v0.41` builds mpv 0.41 with FFmpeg 8.1 (tags
 `v0.41.0-plynic.<n>`); `plynic/v1.1.11` is frozen and is what the 0.36-era
 `v1.1.11-plynic.1` … `.7` were built from, the rollback baseline.
 
+The iOS/macOS counterpart is
+[plynic-libmpv-darwin](https://github.com/linrong123/plynic-libmpv-darwin):
+same plynic-mpv commit, same FFmpeg commit, byte-identical
+`buildscripts/patches/ffmpeg/` (its `patches/ffmpeg/`, same keys and sha256
+in both manifests), same dependency versions, and the same tag for a pair
+of builds.
+
 What differs from upstream:
 
 - **`plynic` flavor** (`buildscripts/flavors/plynic.sh`): upstream `full` without
@@ -157,6 +164,43 @@ deleted, and its source stays available for at least three years after that
 plynic version was last distributed.
 
 ## Releases
+
+### v0.41.0-plynic.rc2
+
+rc2 = rc1 + the generic subtitle keep-out band (spec 0017 T-4) + the Darwin
+commits (S4.2), the commit both platforms now build (prerelease, not pinned
+by the app). FFmpeg, the dependencies and the flavor are unchanged.
+
+- **mpv: plynic-mpv `8235270d93` → `f226dd6356`**:
+  - `sub: make sub-keepout a subtitle option of every VO` — the keep-out
+    band moved from `vo_mediacodec_osd` into `osd_render()`, as
+    `--sub-keepout` (0–50 % of the height, `UPDATE_OSD`), so it also works
+    through the render API (texture path). `--vo-mediacodec-osd-sub-keepout`
+    is an alias; the app can keep writing it, and can probe
+    `option-info/sub-keepout` for the new name.
+  - Darwin only (not compiled here): `meson: enable Objective-C on every
+    Darwin host`, `ao_audiounit: add --audiounit-skip-session-management`,
+    `stream_file: don't ask for the file system type on iOS`.
+- **libmpv.so vs a build without the Darwin commits**: identical except the
+  version string and one assert message (`stream_file.c:278` → `:286`); two
+  builds of the same commit are byte-identical.
+- Checked on the Android 14 TV emulator and the Android 7.0 arm64 emulator,
+  the same list as rc1 with the same results (probe with `ao=null` and
+  `ao=audiotrack`, a second instance, pause without flush, `mediacodec_embed`,
+  `mediacodec_osd` with PGS/ASS, `vo=gpu` static and switched at run time,
+  GBK/Big5/CP1251 detection, the 23-case TLS matrix with the same verdicts,
+  flags and SNI as rc1 on both).
+- **Keep-out band on `mediacodec_osd`**: a paused script (three tracks,
+  keep-out 30/45/10/0, track switches, playing with the band up, 20) gives
+  the same OSD updates (bounding boxes, opaque pixel counts, average colour
+  of all 17) as rc1, with either option name, and redraws within 5–20 ms
+  of a change while paused, as before.
+- **Known, not new**: the first redraw right after a track switch *while
+  paused* races the new track's first decoded subtitle, and nothing redraws
+  again until the next change: in 10 runs of that script on rc1 one showed
+  an older PGS line there, in 14 on rc2 three showed none (until the next
+  keep-out change); the rc1 smoke of wave 1 had the older line as well. To look at in the device matrix (spec 0017 3-6,
+  "暂停时切轨").
 
 ### v0.41.0-plynic.rc1
 
