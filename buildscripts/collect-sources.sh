@@ -24,14 +24,17 @@
 #                                this repository at the commit being built
 #                                (build scripts, flavors, patches)
 #   src-media-kit-android-helper-<sha9>.tar.xz
-#                                the jar's other .so files are built from it
+#                                the jar's other .so file is built from it (as
+#                                is: bundle_plynic.sh sets its NDK and link
+#                                options from outside, include/helper.*)
 #   SOURCES.json                 one entry per file: what it is, version,
 #                                licence, upstream location and commit or
 #                                digest, sha256, size, patches applied;
 #                                after the build, include/static-system.py
-#                                adds "static_system": what libmpv.so links
-#                                from the NDK as it is (the LLVM runtimes),
-#                                with no archive here
+#                                adds "static_system": what the jar's .so
+#                                files link from the NDK as it is (the LLVM
+#                                runtime), with no archive here, and
+#                                "binaries"
 #   SHA256SUMS                   sha256sum -c format
 #
 # Archives are deterministic for a given git and xz: git archive stamps
@@ -212,7 +215,10 @@ add("src-mpv-${v_mpv:0:9}.tar.xz", "mpv", "${v_mpv:0:9}", "LGPL-2.1-or-later",
     note="plynic-mpv: upstream mpv plus the plynic patches as commits; built with -Dgpl=false")
 add("src-media-kit-android-helper-${v_mkhelper_commit:0:9}.tar.xz", "media-kit-android-helper",
     "${v_mkhelper_commit:0:9}", "MIT", "https://github.com/media-kit/media-kit-android-helper",
-    commit="$v_mkhelper_commit", note="builds the jar's other .so files")
+    commit="$v_mkhelper_commit",
+    note="builds the jar's libmediakitandroidhelper.so, from this tree as it is: the NDK and the link "
+         "options (hidden exports) come from include/helper.init.gradle and include/helper.cmake of "
+         "plynic-libmpv-android")
 add("mbedtls-$v_mbedtls.tar.bz2", "mbedtls", "$v_mbedtls", "Apache-2.0 OR GPL-2.0-or-later",
     "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$v_mbedtls/mbedtls-$v_mbedtls.tar.bz2",
     upstream_sha256="$v_mbedtls_sha256", note="upstream release tarball as published; used under Apache-2.0")

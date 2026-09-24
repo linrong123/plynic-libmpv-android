@@ -73,8 +73,9 @@ unset CC CXX # meson wants these unset
 #
 # --print-archive-stats: how many members lld took from each static archive.
 # include/static-system.py reads it after the build to record, in
-# SOURCES.json, the libraries libmpv.so gets from the NDK itself (the LLVM
-# runtimes), and refuses one it does not know.
+# SOURCES.json, what libmpv.so takes from the NDK itself (the LLVM
+# runtimes) and whether any of it is exported, and refuses an NDK archive
+# it does not know (the sysroot's libz.a included).
 #
 # --no-undefined: mpv's meson.build sets b_lundef=false, so a symbol nothing
 # on the link line defines used to become a silent dynamic import. On Android

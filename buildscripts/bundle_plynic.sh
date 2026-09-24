@@ -14,11 +14,17 @@
 #   * the complete corresponding source goes next to them (sources/, see
 #     collect-sources.sh), collected from the pinned trees before patch.sh
 #     touches them, and listed in the manifest;
-#   * what libmpv.so takes from the NDK as it is (zlib, the LLVM runtimes)
-#     is added to SOURCES.json after the build, from lld's archive stats
-#     (include/static-system.py), and copied into the manifest.
+#   * what the jar's two .so files take from the NDK as it is (the LLVM
+#     runtime) is added to SOURCES.json after the build, per binary and ABI,
+#     from lld's archive stats and the binaries' dynamic symbol tables
+#     (include/static-system.py), and copied into the manifest;
+#   * media-kit-android-helper (the jar's libmediakitandroidhelper.so) is
+#     built with the NDK libmpv.so is built with and exports only its own
+#     API (include/helper.init.gradle, include/helper.cmake); its tree stays
+#     the pinned commit.
 set -euxo pipefail
 cd "$(dirname "$0")"
+root=$PWD
 
 rm -rf deps prefix artifacts
 ./download.sh
@@ -32,9 +38,29 @@ chmod +x scripts/*.sh
 
 . ./include/depinfo.sh
 abis=(arm64-v8a armeabi-v7a x86 x86_64)
-./include/static-system.py artifacts/plynic/sources "sdk/android-sdk-linux/ndk/$v_ndk" \
-  $(for abi in "${abis[@]}"; do echo "prefix/$abi/libmpv.archive-stats.tsv"; done)
 ndk_bin=$(echo "$PWD/sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/"*)/bin
+
+# The helper APK provides the jar's other .so file (media-kit's android
+# helper); libmpv.so is swapped in below, exactly as bundle_full.sh does.
+# Built with this repository's NDK and settings from the outside
+# (include/helper.init.gradle); its lld archive stats land next to
+# libmpv.so's in prefix/<abi>/.
+apk=deps/media-kit-android-helper/app/build/outputs/apk/release
+pushd deps/media-kit-android-helper
+chmod +x gradlew
+./gradlew --init-script "$root/include/helper.init.gradle" \
+  -Pplynic.ndkVersion="$v_ndk" \
+  -Pplynic.cmakeInclude="$root/include/helper.cmake" \
+  -Pplynic.archiveStatsDir="$root/prefix" \
+  assembleRelease
+popd
+unzip -o "$apk/app-release.apk" 'lib/*' -d "$apk"
+
+./include/static-system.py artifacts/plynic/sources "sdk/android-sdk-linux/ndk/$v_ndk" \
+  $(for abi in "${abis[@]}"; do
+      echo "prefix/$abi/libmpv.archive-stats.tsv=prefix/$abi/usr/local/lib/libmpv.so"
+      echo "prefix/$abi/libmediakitandroidhelper.archive-stats.tsv=$apk/lib/$abi/libmediakitandroidhelper.so"
+    done)
 
 # Unstripped copies first; the jars get the stripped ones.
 mkdir -p artifacts/plynic/symbols
@@ -45,23 +71,16 @@ for abi in "${abis[@]}"; do
 done
 (cd artifacts/plynic && zip -qr debug-symbols-plynic.zip symbols && rm -rf symbols)
 
-# The helper APK provides the other .so files of the jar (media-kit's
-# android helper); libmpv.so is swapped in, exactly as bundle_full.sh does.
-pushd deps/media-kit-android-helper
-chmod +x gradlew
-./gradlew assembleRelease
-unzip -o app/build/outputs/apk/release/app-release.apk -d app/build/outputs/apk/release
 for abi in "${abis[@]}"; do
-  cp "../../prefix/$abi/usr/local/lib/libmpv.so" "app/build/outputs/apk/release/lib/$abi/"
+  cp "prefix/$abi/usr/local/lib/libmpv.so" "$apk/lib/$abi/"
 done
-pushd app/build/outputs/apk/release
+pushd "$apk"
 for abi in "${abis[@]}"; do
   rm -f "plynic-$abi.jar"
   zip -r "plynic-$abi.jar" "lib/$abi/"*.so
 done
 popd
-popd
-cp deps/media-kit-android-helper/app/build/outputs/apk/release/plynic-*.jar artifacts/plynic/
+cp "$apk"/plynic-*.jar artifacts/plynic/
 
 # manifest.json: the numbers the app's lock file pins.
 # Every library linked into libmpv.so, with the version depinfo.sh pins; the
@@ -93,21 +112,30 @@ out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""),
        "patches": {p["file"]: p["sha256"] for p in sources["patches"]},
        "sources": [{k: e[k] for k in ("file", "id", "version", "license", "sha256", "size")}
                    for e in sources["sources"]],
-       # linked from the NDK as it is, no source archive here (static-system.py)
+       # linked from the NDK as it is, no source archive here, per binary and
+       # ABI; and each binary's NDK, compilers and export count
+       # (static-system.py)
        "static_system": sources.get("static_system", []),
+       "binaries": sources.get("binaries", {}),
        "jar_entry_prefix": "lib/{abi}/", "abis": {}}
+def elf(data, name):
+    so = f"artifacts/plynic/{name}"
+    open(so, "wb").write(data)
+    build_id = next((l.split()[-1] for l in readelf("-n", so).splitlines() if "Build ID" in l), "")
+    needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", readelf("-d", so))
+    os.remove(so)
+    return build_id, needed
 for abi in abis:
     jar_path = f"artifacts/plynic/plynic-{abi}.jar"
     jar = open(jar_path, "rb").read()
     with zipfile.ZipFile(jar_path) as z:
         libmpv = z.read(f"lib/{abi}/libmpv.so")
-    so = f"artifacts/plynic/libmpv-{abi}.so"
-    open(so, "wb").write(libmpv)
-    build_id = next((l.split()[-1] for l in readelf("-n", so).splitlines() if "Build ID" in l), "")
-    needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", readelf("-d", so))
-    os.remove(so)
+        helper = z.read(f"lib/{abi}/libmediakitandroidhelper.so")
+    build_id, needed = elf(libmpv, f"libmpv-{abi}.so")
+    helper_build_id, helper_needed = elf(helper, f"helper-{abi}.so")
     out["abis"][abi] = {"jar": digests(jar), "libmpv": digests(libmpv), "build_id": build_id,
-                        "needed": needed}
+                        "needed": needed,
+                        "helper": dict(digests(helper), build_id=helper_build_id, needed=helper_needed)}
 json.dump(out, open("artifacts/plynic/manifest.json", "w"), indent=2)
 print(json.dumps(out, indent=2))
 PY

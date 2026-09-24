@@ -1,0 +1,34 @@
+// helper.init.gradle — the build settings bundle_plynic.sh gives
+// media-kit-android-helper (the jar's libmediakitandroidhelper.so), from the
+// outside, so that its tree stays the pinned commit as published:
+//
+//   ./gradlew --init-script <this file> \
+//     -Pplynic.ndkVersion=<v_ndk> \
+//     -Pplynic.cmakeInclude=<include/helper.cmake> \
+//     -Pplynic.archiveStatsDir=<prefix> assembleRelease
+//
+// * ndkVersion: the NDK libmpv.so is built with (include/depinfo.sh v_ndk).
+//   The helper's build.gradle names none, so up to rc4 it was whatever this
+//   Android Gradle Plugin (8.4.2) defaults to - NDK r26, clang 17 - while
+//   libmpv.so came from r25c; the jar carried two versions of the static
+//   LLVM runtime, and nothing recorded the helper's.
+// * CMAKE_PROJECT_INCLUDE: include/helper.cmake (hidden exports, lld's
+//   archive statistics).
+// A build without these properties fails instead of using defaults.
+def plynicProperty = { Project p, String name ->
+    def value = p.findProperty(name)
+    if (!value) {
+        throw new GradleException("${name} is not set (see plynic-libmpv-android's buildscripts/include/helper.init.gradle)")
+    }
+    value.toString()
+}
+
+allprojects { Project p ->
+    p.plugins.withId('com.android.application') {
+        p.android.ndkVersion = plynicProperty(p, 'plynic.ndkVersion')
+        p.android.defaultConfig.externalNativeBuild.cmake.arguments.addAll([
+            "-DCMAKE_PROJECT_INCLUDE=${plynicProperty(p, 'plynic.cmakeInclude')}".toString(),
+            "-DPLYNIC_ARCHIVE_STATS_DIR=${plynicProperty(p, 'plynic.archiveStatsDir')}".toString(),
+        ])
+    }
+}
