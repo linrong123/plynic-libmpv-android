@@ -1,10 +1,16 @@
 name: plynic flavor
 
 # The plynic app consumes ONLY what this workflow publishes: a tag
-# `v<media-kit base>-plynic.<n>` builds every ABI of the plynic flavor and
-# attaches plynic-<abi>.jar, manifest.json and debug-symbols-plynic.zip to a
-# GitHub release of that tag. tool/native_libs.lock.json in the app is then
-# filled from manifest.json (tool/fetch_native_libs.sh --update).
+# `v<base>-plynic.<n>` builds every ABI of the plynic flavor and attaches
+# plynic-<abi>.jar, manifest.json, debug-symbols-plynic.zip and the complete
+# corresponding source (sources/: SOURCES.json, SHA256SUMS and one archive
+# per component, see buildscripts/collect-sources.sh) to a GitHub release of
+# that tag. tool/native_libs.lock.json in the app is then filled from
+# manifest.json (tool/fetch_native_libs.sh --update).
+#
+# <base> is the upstream the engine is built on: v1.1.11 (media-kit's build
+# repo) for the 0.36-era plynic.1..7, v0.41.0 (mpv) from then on. A tag whose
+# <n> starts with "rc" (v0.41.0-plynic.rc1) is published as a prerelease.
 
 on:
   push:
@@ -30,10 +36,18 @@ jobs:
           java-version: 17
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-      # nasm: x86/x86_64 assembly of FFmpeg, dav1d and libass. cmake (uchardet),
-      # meson/ninja and python3 (mbedtls's config.py) come with the runner image.
+      # nasm: x86/x86_64 assembly of FFmpeg, dav1d and libass. cmake (uchardet)
+      # and python3 (mbedtls's config.py, libplacebo's GL loader generator)
+      # come with the runner image. meson is pinned (include/depinfo.sh:
+      # v_meson; mpv 0.41 needs >= 1.3.0) instead of whatever pip or the image
+      # has that day; TRAVIS=1 below keeps download-sdk.sh from installing
+      # another one.
       - name: Build tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends autoconf automake libtool gettext autopoint zip unzip nasm
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends autoconf automake libtool gettext autopoint zip unzip nasm ninja-build pkg-config
+          . buildscripts/include/depinfo.sh
+          pipx install "meson==$v_meson"
+          meson --version
       - name: Symlink SDK
         working-directory: ./buildscripts
         run: |
@@ -43,12 +57,18 @@ jobs:
         working-directory: ./buildscripts
         env:
           PLYNIC_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          TRAVIS: 1
         run: ./bundle_plynic.sh
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: plynic-flavor
-          path: ./buildscripts/artifacts/plynic/**
+          path: |
+            ./buildscripts/artifacts/plynic/*.jar
+            ./buildscripts/artifacts/plynic/*.zip
+            ./buildscripts/artifacts/plynic/manifest.json
+            ./buildscripts/artifacts/plynic/sources/SOURCES.json
+            ./buildscripts/artifacts/plynic/sources/SHA256SUMS
       - name: Release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
@@ -56,8 +76,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           draft: false
-          prerelease: false
+          prerelease: ${{ startsWith(github.ref_name, 'v') && contains(github.ref_name, '-plynic.rc') }}
           files: |
             buildscripts/artifacts/plynic/plynic-*.jar
             buildscripts/artifacts/plynic/manifest.json
             buildscripts/artifacts/plynic/debug-symbols-plynic.zip
+            buildscripts/artifacts/plynic/sources/*

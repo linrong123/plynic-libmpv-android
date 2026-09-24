@@ -5,6 +5,8 @@
 v_sdk=9123335_latest
 v_ndk=25.2.9519653
 v_sdk_build_tools=33.0.2
+# mpv 0.41 needs meson >= 1.3.0; CI installs exactly this one (download-sdk.sh)
+v_meson=1.10.0
 
 # Sources fetched with git are pinned by tag AND commit: download-deps.sh
 # refuses a checkout whose HEAD is not v_<dep>_commit (a tag can be moved).

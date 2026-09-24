@@ -10,12 +10,16 @@
 #     plynic app is filled from that file, nothing is typed by hand;
 #   * the unstripped libmpv.so of every ABI is kept (debug-symbols-plynic.zip):
 #     the app's crash records report `libmpv.so+0x<pc>` with the build-id, and
-#     only the unstripped file turns that into a function and a line.
+#     only the unstripped file turns that into a function and a line;
+#   * the complete corresponding source goes next to them (sources/, see
+#     collect-sources.sh), collected from the pinned trees before patch.sh
+#     touches them, and listed in the manifest.
 set -euxo pipefail
 cd "$(dirname "$0")"
 
 rm -rf deps prefix artifacts
 ./download.sh
+./collect-sources.sh artifacts/plynic/sources
 ./patch.sh
 
 cp flavors/plynic.sh scripts/ffmpeg.sh
@@ -57,27 +61,48 @@ cp deps/media-kit-android-helper/app/build/outputs/apk/release/plynic-*.jar arti
 # manifest.json: the numbers the app's lock file pins.
 # Every library linked into libmpv.so, with the version depinfo.sh pins; the
 # app copies this "deps" object into tool/native_libs.lock.json verbatim.
-python3 - "$v_mpv" "$v_mpv_repo" "$v_ndk" "$v_ffmpeg" "$v_libass" "$v_harfbuzz" "$v_freetype" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet" "$ndk_bin" "${abis[@]}" <<'PY'
-import hashlib, json, os, subprocess, sys, zipfile
-mpv, mpv_repo, ndk, ffmpeg, libass, harfbuzz, freetype, fribidi, libxml2, mbedtls, dav1d, libiconv, uchardet, ndk_bin = sys.argv[1:15]
-abis = sys.argv[15:]
+python3 - "$ndk_bin" "${abis[@]}" <<PY
+import hashlib, json, os, re, subprocess, sys, zipfile
+ndk_bin = sys.argv[1]
+abis = sys.argv[2:]
 def digests(data):
     return {"md5": hashlib.md5(data).hexdigest(), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
-out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""), "mpv_commit": mpv, "mpv_repo": mpv_repo, "ndk": ndk,
-       "deps": {"ffmpeg": ffmpeg, "libass": libass, "harfbuzz": harfbuzz, "freetype": freetype.replace("-", "."),
-                "fribidi": fribidi, "libxml2": libxml2, "mbedtls": mbedtls, "dav1d": dav1d,
-                "libiconv": libiconv, "uchardet": uchardet},
+def readelf(*args):
+    return subprocess.run([f"{ndk_bin}/llvm-readelf", *args], check=True, capture_output=True, text=True).stdout
+sources = json.load(open("artifacts/plynic/sources/SOURCES.json"))
+out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""),
+       "mpv_commit": "$v_mpv", "mpv_repo": "$v_mpv_repo",
+       # what the mpv-version property reports (scripts/mpv.sh stamps it)
+       "mpv_version": "v" + open("deps/mpv/MPV_VERSION").read().strip() + "-plynic-g" + "$v_mpv"[:9],
+       "ndk": "$v_ndk", "meson": "$v_meson",
+       "deps": {"ffmpeg": "$v_ffmpeg", "libplacebo": "$v_libplacebo", "libass": "$v_libass",
+                "harfbuzz": "$v_harfbuzz", "freetype": "${v_freetype//-/.}", "fribidi": "$v_fribidi",
+                "libxml2": "$v_libxml2", "mbedtls": "$v_mbedtls", "dav1d": "$v_dav1d",
+                "libiconv": "$v_libiconv", "uchardet": "$v_uchardet"},
+       "dep_commits": {"ffmpeg": "$v_ffmpeg_commit", "libplacebo": "$v_libplacebo_commit",
+                       "libass": "$v_libass_commit", "harfbuzz": "$v_harfbuzz_commit",
+                       "freetype": "$v_freetype_commit", "fribidi": "$v_fribidi_commit",
+                       "libxml2": "$v_libxml2_commit", "dav1d": "$v_dav1d_commit"},
+       # every patch applied to a dependency, by sha256: the Darwin build must
+       # carry byte-identical copies of the shared FFmpeg TLS patches
+       "patches": {p["file"]: p["sha256"] for p in sources["patches"]},
+       "sources": [{k: e[k] for k in ("file", "id", "version", "license", "sha256", "size")}
+                   for e in sources["sources"]],
        "jar_entry_prefix": "lib/{abi}/", "abis": {}}
 for abi in abis:
     jar_path = f"artifacts/plynic/plynic-{abi}.jar"
     jar = open(jar_path, "rb").read()
     with zipfile.ZipFile(jar_path) as z:
         libmpv = z.read(f"lib/{abi}/libmpv.so")
-    bid = subprocess.run([f"{ndk_bin}/llvm-readelf", "-n", f"prefix/{abi}/usr/local/lib/libmpv.so"], capture_output=True, text=True).stdout
-    build_id = next((l.split()[-1] for l in bid.splitlines() if "Build ID" in l), "")
-    out["abis"][abi] = {"jar": digests(jar), "libmpv": digests(libmpv), "build_id": build_id}
+    so = f"artifacts/plynic/libmpv-{abi}.so"
+    open(so, "wb").write(libmpv)
+    build_id = next((l.split()[-1] for l in readelf("-n", so).splitlines() if "Build ID" in l), "")
+    needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", readelf("-d", so))
+    os.remove(so)
+    out["abis"][abi] = {"jar": digests(jar), "libmpv": digests(libmpv), "build_id": build_id,
+                        "needed": needed}
 json.dump(out, open("artifacts/plynic/manifest.json", "w"), indent=2)
 print(json.dumps(out, indent=2))
 PY
 
-(cd artifacts/plynic && md5sum *.jar *.zip manifest.json)
+(cd artifacts/plynic && md5sum *.jar *.zip manifest.json && cat sources/SHA256SUMS)
