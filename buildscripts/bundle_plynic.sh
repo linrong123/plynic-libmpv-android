@@ -8,9 +8,12 @@
 #     manifest.json with md5 / sha256 / size of each jar AND of the libmpv.so
 #     inside it, plus the GNU build-id — tool/native_libs.lock.json in the
 #     plynic app is filled from that file, nothing is typed by hand;
-#   * the unstripped libmpv.so of every ABI is kept (debug-symbols-plynic.zip):
-#     the app's crash records report `libmpv.so+0x<pc>` with the build-id, and
-#     only the unstripped file turns that into a function and a line;
+#   * the unstripped libmpv.so and libmediakitandroidhelper.so of every ABI
+#     are kept (debug-symbols-plynic.zip; the helper since rc6): the app's
+#     crash records report `<library>+0x<pc>` with the build-id, and only the
+#     unstripped file turns that into a function and a line. Each one's
+#     build-id has to be the one the jar's stripped copy (and manifest.json)
+#     carries, or the build fails;
 #   * the complete corresponding source goes next to them (sources/, see
 #     collect-sources.sh), collected from the pinned trees before patch.sh
 #     touches them, and listed in the manifest;
@@ -56,6 +59,29 @@ chmod +x gradlew
 popd
 unzip -o "$apk/app-release.apk" 'lib/*' -d "$apk"
 
+build_id() {
+  "$ndk_bin/llvm-readelf" -n "$1" | awk '/Build ID/ {print $3}'
+}
+# The helper as linked, before the Android Gradle Plugin stripped it for the
+# APK: the copy in AGP's merged native libraries (or CMake's output) whose
+# build-id is the APK's and which still has its debug info.
+helper_unstripped() {
+  local abi=$1 want f
+  want=$(build_id "$apk/lib/$abi/libmediakitandroidhelper.so")
+  [ -n "$want" ] || { echo "the APK's $abi libmediakitandroidhelper.so has no build-id" >&2; return 1; }
+  for f in deps/media-kit-android-helper/app/build/intermediates/merged_native_libs/release/*/out/lib/"$abi"/libmediakitandroidhelper.so \
+           deps/media-kit-android-helper/app/build/intermediates/cxx/*/*/obj/"$abi"/libmediakitandroidhelper.so; do
+    [ -f "$f" ] || continue
+    # (grep without -q: with pipefail, -q's early exit would fail readelf)
+    if [ "$(build_id "$f")" = "$want" ] && "$ndk_bin/llvm-readelf" -S "$f" | grep ' \.debug_info ' > /dev/null; then
+      echo "$f"
+      return 0
+    fi
+  done
+  echo "no unstripped libmediakitandroidhelper.so with build-id $want for $abi under the helper's build" >&2
+  return 1
+}
+
 ./include/static-system.py artifacts/plynic/sources "sdk/android-sdk-linux/ndk/$v_ndk" \
   $(for abi in "${abis[@]}"; do
       echo "prefix/$abi/libmpv.archive-stats.tsv=prefix/$abi/usr/local/lib/libmpv.so"
@@ -68,6 +94,8 @@ for abi in "${abis[@]}"; do
   mkdir -p "artifacts/plynic/symbols/$abi"
   cp "prefix/$abi/usr/local/lib/libmpv.so" "artifacts/plynic/symbols/$abi/libmpv.so"
   "$ndk_bin/llvm-strip" --strip-all "prefix/$abi/usr/local/lib/libmpv.so"
+  helper=$(helper_unstripped "$abi")
+  cp "$helper" "artifacts/plynic/symbols/$abi/libmediakitandroidhelper.so"
 done
 (cd artifacts/plynic && zip -qr debug-symbols-plynic.zip symbols && rm -rf symbols)
 
@@ -136,6 +164,22 @@ for abi in abis:
     out["abis"][abi] = {"jar": digests(jar), "libmpv": digests(libmpv), "build_id": build_id,
                         "needed": needed,
                         "helper": dict(digests(helper), build_id=helper_build_id, needed=helper_needed)}
+# debug-symbols-plynic.zip: per ABI both libraries, unstripped, with the
+# build-ids of the jar's copies; a file the jar does not match symbolizes
+# nothing.
+with zipfile.ZipFile("artifacts/plynic/debug-symbols-plynic.zip") as z:
+    names = set(z.namelist())
+    for abi in abis:
+        for lib, want in (("libmpv.so", out["abis"][abi]["build_id"]),
+                          ("libmediakitandroidhelper.so", out["abis"][abi]["helper"]["build_id"])):
+            entry = f"symbols/{abi}/{lib}"
+            if entry not in names:
+                sys.exit(f"debug-symbols-plynic.zip: no {entry}")
+            got, _ = elf(z.read(entry), f"symbols-{abi}-{lib}")
+            if not want or got != want:
+                sys.exit(f"debug-symbols-plynic.zip: {entry} has build-id {got}, the jar's copy {want}")
+            print(f"debug-symbols-plynic.zip: {entry} build-id {got}, as in the jar "
+                  f"({z.getinfo(entry).file_size} bytes unstripped)")
 json.dump(out, open("artifacts/plynic/manifest.json", "w"), indent=2)
 print(json.dumps(out, indent=2))
 PY
