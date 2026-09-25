@@ -41,8 +41,8 @@ done
 # meson in place of git describe.
 mpv_version=$(sed -n 's/^echo //p' prefix/*/plynic-mpv-version 2>/dev/null | sort -u | paste -sd' ' -)
 # Same keys as the CI manifest's "deps" (bundle_plynic.sh).
-deps=$(printf '"ffmpeg": "%s", "libplacebo": "%s", "libass": "%s", "harfbuzz": "%s", "freetype": "%s", "fribidi": "%s", "libxml2": "%s", "mbedtls": "%s", "dav1d": "%s", "libiconv": "%s", "uchardet": "%s"' \
-  "$v_ffmpeg" "$v_libplacebo" "$v_libass" "$v_harfbuzz" "${v_freetype//-/.}" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet")
+deps=$(printf '"ffmpeg": "%s", "libplacebo": "%s", "libass": "%s", "harfbuzz": "%s", "freetype": "%s", "fribidi": "%s", "libxml2": "%s", "mbedtls": "%s", "dav1d": "%s", "libiconv": "%s", "uchardet": "%s", "zlib": "%s"' \
+  "$v_ffmpeg" "$v_libplacebo" "$v_libass" "$v_harfbuzz" "${v_freetype//-/.}" "$v_fribidi" "$v_libxml2" "$v_mbedtls" "$v_dav1d" "$v_libiconv" "$v_uchardet" "$v_zlib")
 printf '{\n  "mpv_commit": "%s",\n  "mpv_dirty": %s,\n  "mpv_version": "%s",\n  "flavor": "%s",\n  "ndk": "%s",\n  "deps": {%s},\n  "abis": {%b\n  }\n}\n' \
   "$mpv_commit" "$mpv_dirty" "$mpv_version" "$flavor" "$v_ndk" "$deps" "$entries" > out/buildinfo.json
 echo "wrote out/buildinfo.json (mpv $mpv_commit dirty=$mpv_dirty flavor=$flavor)"
