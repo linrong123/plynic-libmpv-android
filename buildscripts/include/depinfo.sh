@@ -51,9 +51,10 @@ v_libplacebo_commit=cee9b076f2c63104ccfd497fa79c39a867293ec4
 # plynic/v0.41.0 of the repo below; plynic/78d43740f5 is frozen and backs the
 # v1.1.11-plynic.* releases). Pin the fork's commit, not the branch, so a
 # rebuilt tag is bit-for-bit the same engine.
-v_mpv=d75b92b584eacb8e3197ec03529f7de2693b9b00
+v_mpv=4c4e802343438d79561abbd15d9bc453473860af
 v_mpv_repo=https://github.com/linrong123/plynic-mpv.git
-# media-kit's Android helper: the jar's other .so files come from its APK
+# media-kit's Android helper: the jar's other .so file (libmediakitandroidhelper.so)
+# comes from its APK
 v_mkhelper_commit=42054e5d479f39ccbb0ae604862e2bcaf59b74c2
 v_libogg=1.3.5
 v_libvorbis=1.3.7
