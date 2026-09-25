@@ -56,7 +56,10 @@ What differs from upstream:
 - **Nothing of the C++ runtime is exported**: libplacebo needs the NDK's static
   libc++, which is linked in and hidden (`--exclude-libs`), as are libplacebo,
   libiconv, uchardet and zlib themselves, and compiler-rt's builtins (since rc4:
-  rc1-rc3 exported their `__emutls_get_address`). The only `__` names
+  rc1-rc3 exported their `__emutls_get_address`). The build checks it: it
+  fails when libmpv.so exports a single definition of one of those archives
+  (for the pinned dependencies since rc6, see
+  [Corresponding source](#corresponding-source)). The only `__` names
   libmpv.so exports are libxml2's `__xml*`. `DT_NEEDED` is `libm libandroid
   libmediandk libdl libOpenSLES libEGL libc`; a `libc++_shared.so` there would
   keep libmpv.so from loading (the app does not ship one). The jar's other
@@ -73,8 +76,10 @@ What differs from upstream:
 - CI (`.github/workflows/plynic.yaml`): a tag `v<base>-plynic.<n>` builds the
   four ABIs and attaches `plynic-<abi>.jar`, `manifest.json` (digests, sizes,
   build-ids, `DT_NEEDED`, dependency versions and commits, patch digests,
-  sources), `debug-symbols-plynic.zip` and `sources/*` to the release; a tag
-  `v<base>-plynic.rc<n>` is published as a prerelease.
+  sources), `debug-symbols-plynic.zip` (per ABI both libraries of the jar,
+  unstripped, with the jar's build-ids; the helper since rc6) and
+  `sources/*` to the release; a tag `v<base>-plynic.rc<n>` is published as a
+  prerelease.
 
 ## Log lines for embedders
 
@@ -125,6 +130,32 @@ tls: mbedtls_ssl_get_verify_result reported problems with the certificate verifi
   certificates or a verify callback, none of which FFmpeg sets up.
 - Several reasons can be set at once (above: expired and for another host).
   Checked against mbedtls 3.6.7 over TLS 1.3 and TLS 1.2.
+
+**Rotation** (`video-rotate`, or the rotation a file carries): mpv rotates in
+the VO when the VO can (`vo=gpu` and the render API's OpenGL backend, every
+multiple of 90 degrees) and otherwise asks lavfi for its `rotate` filter,
+which this build does not have (the flavor keeps two FFmpeg filters,
+overlay and equalizer). A rotated frame that reaches a VO that cannot rotate
+logs
+
+```
+lavfi: filter 'rotate' not found or failed to allocate     (fatal)
+autorotate: Creating filter 'rotate' failed.                (error)
+autorotate: could not create rotation filter                (error)
+```
+
+and passes on unrotated. The VO that does this is `vo=null`: media_kit's
+Android texture writes it while it has no Surface and first when the
+Surface changes (`vo=null`, `android-surface-size`, `wid`, `vo`), so a
+rotated video whose track stays selected across the change logs those lines
+once, and the VO that follows shows it rotated as it should; parking the
+track first (`vid=no` ... `vid=auto`) avoids them. Nothing is lost: vo=null
+throws the frames away. MediaCodec surface frames (`vo=mediacodec_embed`,
+`vo=mediacodec_osd`) cannot be rotated in software at all: `autorotate:
+Video rotation with this format not supported` (error), and the picture
+stays as decoded. The render API's software backend (not used on Android)
+draws rotated frames unrotated since rc6. `tools/rotate-check` checks all of
+it on a device.
 
 **CA file**: `tls: mbedtls_x509_crt_parse_file for CA cert returned <n>`
 (`error`: `n` < 0, or not a single certificate could be parsed; the same in
@@ -178,7 +209,7 @@ source its `libmpv.so` was built from (`buildscripts/collect-sources.sh`):
 one archive per dependency at the pinned commit (`git archive`, submodules
 included) or the upstream release tarball itself (same SHA-256 as upstream's),
 the plynic-mpv tree at `v_mpv`, the patches, media-kit-android-helper (the
-jar's other `.so` files), this repository at the tagged commit,
+jar's other `.so` file), this repository at the tagged commit,
 `SOURCES.json` (version, licence, upstream location and commit or digest,
 SHA-256, patches of each file) and `SHA256SUMS`. `manifest.json` lists the
 same files.
@@ -194,13 +225,21 @@ and per binary (`libmpv.so`, `libmediakitandroidhelper.so`) and ABI each
 archive's path in the NDK, SHA-256, how many members lld took and how many
 of its definitions the binary exports (counted in its dynamic symbol table).
 `binaries` records per binary and ABI the NDK, the compilers its `.comment`
-section names, the linker and the number of exported symbols.
+section names, the linker and the number of exported symbols, and (since
+rc6) under `prefix` each archive of the build prefix that libmpv.so takes
+code from: the dependency it is built from, whether libmpv.so hides it
+(zlib, libiconv, uchardet, libplacebo: `--exclude-libs` in `scripts/mpv.sh`)
+and how many of its members were taken and of its definitions are exported;
+the SOURCES.json entry of each hidden dependency has the same numbers under
+`hidden_in`.
 `include/static-system.py` writes both after the build from lld's
 `--print-archive-stats` (`scripts/mpv.sh`, `include/helper.cmake`) and the
 binaries themselves, and fails the build when lld takes code from an NDK
 archive other than those (the sysroot's `libz.a` included), when a binary
-exports any of it, or when a binary was compiled or linked by another clang
-than the NDK's.
+exports any of it, when libmpv.so exports any definition of a hidden
+dependency, does not link one (renamed, moved, no longer static) or takes
+code from a prefix archive the script does not classify, or when a binary
+was compiled or linked by another clang than the NDK's.
 For a local release: `collect-sources.sh <dir>`, the build, the helper
 (`bundle_plynic.sh` has the Gradle line), then `include/static-system.py
 <dir> sdk/android-sdk-linux/ndk/<v_ndk> prefix/<abi>/libmpv.archive-stats.tsv=prefix/<abi>/lib/libmpv.so
@@ -211,6 +250,77 @@ deleted, and its source stays available for at least three years after that
 plynic version was last distributed.
 
 ## Releases
+
+### v0.41.0-plynic.rc6
+
+rc6 = rc5 + an upstream fix both platforms build + checks on what rc5
+recorded by hand (prerelease, not pinned by the app). FFmpeg, the
+dependencies, the flavor and the helper are unchanged.
+
+- **mpv: plynic-mpv `d75b92b584` → `4c4e802343`**: `vo_libmpv: use the
+  VO_CAP of the renderer backend instead of the VO` (upstream `7a94ec5719`,
+  cherry-picked). vo_libmpv announced `VO_CAP_ROTATE90` for every render API
+  backend and computed a rotated source rectangle for the software backend
+  too, which cannot rotate: the first frame rotated by 90 or 270 degrees (a
+  file with that rotation, `video-rotate=90`) aborted the process on an
+  assertion in `mp_image_crop()`. That backend is media_kit_video's on iOS
+  (the simulator, a device without its OpenGL texture), where rc5 aborted on
+  every portrait phone video; with the fix it draws such frames unrotated.
+  Android renders through `vo=gpu` and the MediaCodec VOs, not the render
+  API: the code runs here only if an embedder uses the software backend.
+- **Rotation needs no FFmpeg filter** (the rc5 app smoke saw `filter
+  'rotate' not found` with `video-rotate=90` on the texture path, and the
+  picture turned correctly). mpv rotates in the VO when the VO can and asks
+  lavfi for `rotate` otherwise; the only VO in the app's paths that gets
+  there is media_kit's `vo=null` placeholder, whose frames are thrown away,
+  and MediaCodec surface frames cannot be rotated in software whatever
+  FFmpeg has. Enabling `rotate` would only make a rotated file's frames go
+  through a CPU rotation while `vo=null` holds them. The flavor stays as it
+  is; the log lines and when they appear are under
+  [Log lines for embedders](#log-lines-for-embedders). `tools/rotate-check`
+  (new) checks it over adb: `vo=gpu` into a Surface shows `video-rotate`
+  0/90/180/270 and a file's display-matrix rotation correctly (each frame
+  read back), `vo=null` logs the missing filter, media_kit's Surface change
+  order logs it once while the picture stays right, the order that parks
+  the track first does not, and `vo=mediacodec_embed` reports that MediaCodec
+  frames cannot be rotated. rc5 and rc6 give the same results.
+- **The hidden dependencies are checked**: rc5 hid zlib (and before it
+  libiconv, uchardet, libplacebo) with `--exclude-libs`, but
+  `static-system.py` skipped the build prefix, so "hidden" in SOURCES.json
+  was not checked by anything. The build now fails when libmpv.so exports a
+  single definition of a hidden archive, does not link one, or links a
+  prefix archive nobody classified; `binaries.libmpv.so.<abi>.prefix` and
+  each hidden dependency's `hidden_in` in SOURCES.json have the measured
+  numbers (0 exported for all four, every ABI). A test build with `libz.a`
+  left out of `--exclude-libs` fails with 57 exported zlib definitions.
+- **debug-symbols-plynic.zip has the helper**: per ABI the unstripped
+  `libmediakitandroidhelper.so` next to `libmpv.so`, found by the build-id
+  of the jar's stripped copy; the build fails when a file is missing or its
+  build-id is not the jar's (manifest.json's `build_id`, `helper.build_id`).
+- **Correction to rc5's notes**: the helper sizes there were a local
+  build's; the release's are armeabi-v7a 104 764 and x86 199 772 bytes (local
+  104 780, 199 788), arm64 and x86_64 the same (fixed above). The README
+  said "the jar's other `.so` files"; it has one.
+- **libmpv.so vs rc5** (CI builds): the same size on every ABI (arm64 19 797
+  368, armeabi-v7a 18 538 800, x86 20 429 116, x86_64 23 687 800 bytes),
+  the same exports (9033, 8636, 7731, 8153) and `DT_NEEDED`; the difference
+  is `vo_libmpv.c` and the version stamp (`-g4c4e80234`). The helper is
+  byte-identical to rc5's.
+- **Checked** on the Android 14 TV emulator and the Android 7.0 arm64
+  emulator, a local build of this commit next to rc5's CI build (the
+  release body says what was run on this release's own jars):
+  the rc1 list (probe with `ao=null` and `ao=audiotrack`, a second instance,
+  pause without flush, `mediacodec_embed`, `mediacodec_osd` with PGS/ASS,
+  `vo=gpu` static and switched at run time, GBK/Big5/CP1251 detection),
+  the 23-case TLS matrix (verdicts, TLS log lines, SNI and handshakes the
+  same as rc5's on both), `tools/osd-check` (keep-out under both names, 20
+  of 20 paused switches), `tools/rotate-check` (6 of 6), `screenshot-raw`
+  (software frames in bgr0 and rgba64; MediaCodec surface frames fail, as
+  always), a PNG `screenshot-to-file` (compression 9) decoded back by
+  FFmpeg's PNG decoder and read back from a Surface with the right colours,
+  and the helper in an `app_process` harness (JNI natives, the asset copy
+  through a stand-in Context, the 7 C functions through `dlsym`,
+  `OpenFileDescriptor` calling back into Java).
 
 ### v0.41.0-plynic.rc5
 
@@ -237,8 +347,11 @@ features are unchanged.
   Android Gradle Plugin's default r26 (clang 17.0.2), and exports 12 symbols
   (the 7 `MediaKitAndroidHelper*` functions, the 5 JNI natives) instead of
   about 700 (its static C++ runtime: `std::`, `__cxa_*`,
-  `__gxx_personality_v0`, `__emutls_get_address`). Stripped arm64 386 696 →
-  213 936 bytes, armeabi-v7a 286 812 → 104 780. See
+  `__gxx_personality_v0`, `__emutls_get_address`). Stripped, rc4 → rc5 as
+  released (CI builds): arm64 386 696 → 213 936 bytes, armeabi-v7a 286 812
+  → 104 764, x86 350 252 → 199 772, x86_64 367 528 → 217 696. (These notes
+  gave local build sizes until rc6; like libmpv.so, the helper differs by a
+  few bytes between a CI and a local build of the same commit.) See
   [Dependencies](#dependencies).
 - **`static_system` per binary, exports counted**: SOURCES.json and
   manifest.json record the LLVM runtime per binary and ABI, both libraries,
