@@ -233,7 +233,8 @@ add("zlib-$v_zlib.tar.xz", "zlib", "$v_zlib", "Zlib",
     upstream_sha256="$v_zlib_sha256",
     note="upstream release tarball as published (also on zlib.net, same sha256; signed by Mark Adler, "
          "OpenPGP key 5ED46A6721D365587791E2AA783FCD8E58BCAFBA); only libz.a is built (scripts/zlib.sh), "
-         "hidden in libmpv.so")
+         "hidden in libmpv.so: \"hidden_in\" has, per ABI, the members linked and how many of its definitions "
+         "libmpv.so exports (0; include/static-system.py fails the build otherwise)")
 add(f"patches-{tag}.tar.xz", "patches", tag, "LGPL-3.0-or-later", "",
     note="buildscripts/patches, applied by patch.sh in file name order; under the terms of the FFmpeg "
          "code they change. upstream_*.patch are FFmpeg's own commits (git format-patch), backported")

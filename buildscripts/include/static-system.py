@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""static-system.py — record in SOURCES.json what the jar's .so files take from the NDK.
+"""static-system.py — record in SOURCES.json what the jar's .so files link statically, and check it.
 
     include/static-system.py <sources dir> <ndk dir> <stats.tsv>=<binary.so>...
 
@@ -25,13 +25,28 @@ not assumed). "binaries" records, per binary and ABI, the NDK revision, the
 compilers its .comment section names and its dynamic export count. It
 rewrites the SOURCES.json line of SHA256SUMS.
 
+The build prefix's archives (the pinned dependencies built here) are
+checked the same way (since rc6): every one libmpv.so takes code from has
+to be classified in PREFIX below, and the ones scripts/mpv.sh hides with
+--exclude-libs (zlib, libiconv, uchardet, libplacebo) must not have a
+single definition in its dynamic symbol table. Per binary and ABI,
+"binaries" gets each prefix archive's members taken and exported count
+("prefix"), and the SOURCES.json entry of each hidden dependency its
+measured count ("hidden_in"). Until rc5 the prefix was skipped: that zlib
+was hidden rested on the --exclude-libs list alone, and an archive dropped
+from it (renamed, moved, a list trimmed) would have been exported again
+without anything noticing.
+
 The build fails when lld took code from an archive that is neither the
 build prefix's (the pinned dependencies) nor one of the NDK archives below -
 the NDK sysroot's libz.a included: zlib is built here (scripts/zlib.sh) -,
-when a binary exports anything of those archives, or when a binary was
-compiled or linked by another clang than this NDK's (a helper built with
-the Android Gradle Plugin's default NDK, say, or an NDK archive that the
-platform build compiled, like the sysroot's libz.a with its clang 15.0.1).
+when a binary exports anything of those NDK archives, when libmpv.so takes
+code from an unclassified prefix archive, does not link a hidden one, or
+exports any definition of one (the helper links nothing from the prefix),
+or when a binary was compiled or linked by another clang than this NDK's (a
+helper built with the Android Gradle Plugin's default NDK, say, or an NDK
+archive that the platform build compiled, like the sysroot's libz.a with
+its clang 15.0.1).
 """
 import glob
 import hashlib
@@ -57,6 +72,37 @@ REFUSED = {
     r"sysroot/usr/lib/[^/]+/libz\.a": "zlib comes from the build prefix (scripts/zlib.sh), not the NDK sysroot",
 }
 
+# The build prefix's archives libmpv.so links, by file name: the SOURCES.json
+# id of the dependency each is built from, and whether libmpv.so hides it.
+# hidden: scripts/mpv.sh passes it to --exclude-libs (nothing outside
+# libmpv.so needs its API); libmpv.so must link it and export none of its
+# definitions. Not hidden: linked as media-kit's builds always did, with
+# default visibility; the exports are counted, not limited. A new archive
+# has to be added here before a build with it passes.
+HIDDEN, VISIBLE = True, False
+PREFIX = {
+    "libz.a": ("zlib", HIDDEN),
+    "libiconv.a": ("libiconv", HIDDEN),
+    "libuchardet.a": ("uchardet", HIDDEN),
+    "libplacebo.a": ("libplacebo", HIDDEN),
+    "libavcodec.a": ("ffmpeg", VISIBLE),
+    "libavfilter.a": ("ffmpeg", VISIBLE),
+    "libavformat.a": ("ffmpeg", VISIBLE),
+    "libavutil.a": ("ffmpeg", VISIBLE),
+    "libswresample.a": ("ffmpeg", VISIBLE),
+    "libswscale.a": ("ffmpeg", VISIBLE),
+    "libass.a": ("libass", VISIBLE),
+    "libfreetype.a": ("freetype", VISIBLE),
+    "libfribidi.a": ("fribidi", VISIBLE),
+    "libharfbuzz.a": ("harfbuzz", VISIBLE),
+    "libdav1d.a": ("dav1d", VISIBLE),
+    "libxml2.a": ("libxml2", VISIBLE),
+    "libmbedcrypto.a": ("mbedtls", VISIBLE),
+    "libmbedtls.a": ("mbedtls", VISIBLE),
+    "libmbedx509.a": ("mbedtls", VISIBLE),
+}
+PREFIX_BINARY = "libmpv.so"  # the only binary that links the prefix
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -73,6 +119,13 @@ def read(path):
 
 def run(*args):
     return subprocess.run(args, check=True, capture_output=True, text=True).stdout
+
+
+def defined(nm, cache, path):
+    """The external definitions of a static archive."""
+    if path not in cache:
+        cache[path] = set(run(nm, "--defined-only", "--extern-only", "--format=just-symbols", path).split())
+    return cache[path]
 
 
 def main():
@@ -133,11 +186,16 @@ def main():
                                               "exports": len(exports)}
 
         linked = {}  # path relative to the NDK toolchain -> (members, extracted)
+        from_prefix = {}  # archive file name -> (path, members, extracted)
         for line in read(stats).splitlines()[1:]:
             members, extracted, path = line.split("\t", 2)
             real = os.path.realpath(path)
             if any(real.startswith(p + os.sep) for p in prefixes):
-                continue  # a pinned dependency built here, published by collect-sources.sh
+                # a pinned dependency built here, published by collect-sources.sh
+                arc = os.path.basename(real)
+                _, m, e = from_prefix.get(arc, (real, 0, 0))
+                from_prefix[arc] = (real, max(m, int(members)), e + int(extracted))
+                continue
             if not real.startswith(tc + os.sep):
                 if int(extracted):
                     problems.append(f"{name} {abi}: {path}: neither the build prefix nor this NDK")
@@ -145,6 +203,40 @@ def main():
             rel = os.path.relpath(real, tc)
             m, e = linked.get(rel, (0, 0))
             linked[rel] = (max(m, int(members)), e + int(extracted))
+
+        # The prefix: every archive classified, the hidden ones linked and
+        # not exported, whatever --exclude-libs in scripts/mpv.sh says.
+        prefix_rec = {}
+        for arc, (real, members, extracted) in sorted(from_prefix.items()):
+            if not extracted:
+                continue
+            if name != PREFIX_BINARY:
+                problems.append(f"{name} {abi}: takes {extracted} members of the build prefix's {arc}; "
+                                f"only {PREFIX_BINARY} links the pinned dependencies")
+                continue
+            if arc not in PREFIX:
+                problems.append(f"{name} {abi}: the build prefix's {arc} ({extracted} of {members} members) "
+                                "is not classified in include/static-system.py (PREFIX: hidden or not)")
+                continue
+            source, hidden = PREFIX[arc]
+            leaked = sorted(exports & defined(nm, archive_defs, real))
+            prefix_rec[arc] = {"source": source, "hidden": hidden, "members": members,
+                                "extracted": extracted, "exported": len(leaked)}
+            if hidden and leaked:
+                # scripts/mpv.sh hides it with --exclude-libs; exported, its
+                # API is offered to every other library in the process (and
+                # SOURCES.json would say "hidden" of something that is not).
+                prefix_rec[arc]["exported_sample"] = leaked[:5]
+                problems.append(f"{name} {abi}: exports {len(leaked)} definitions of the build prefix's "
+                                f"{arc} ({', '.join(leaked[:5])}{', ...' if len(leaked) > 5 else ''}), "
+                                "which must be hidden (--exclude-libs in scripts/mpv.sh)")
+        if name == PREFIX_BINARY:
+            for arc, (source, hidden) in sorted(PREFIX.items()):
+                if hidden and arc not in prefix_rec:
+                    problems.append(f"{name} {abi}: does not link the build prefix's {arc} ({source}), which "
+                                    "include/static-system.py expects hidden in it: renamed, moved, or no "
+                                    "longer a static archive? Update PREFIX and scripts/mpv.sh together")
+            binaries[name][abi]["prefix"] = prefix_rec
 
         for rel, (members, extracted) in sorted(linked.items()):
             if not extracted:
@@ -159,10 +251,7 @@ def main():
                                 "classified in include/static-system.py")
                 continue
             path = os.path.join(tc, rel)
-            if path not in archive_defs:
-                archive_defs[path] = set(run(nm, "--defined-only", "--extern-only", "--format=just-symbols",
-                                             path).split())
-            leaked = sorted(exports & archive_defs[path])
+            leaked = sorted(exports & defined(nm, archive_defs, path))
             rec = {"path": rel, "sha256": sha256(path), "members": members, "extracted": extracted,
                    "exported": len(leaked)}
             if leaked:
@@ -207,6 +296,18 @@ def main():
     doc = json.load(open(path))
     doc["static_system"] = static_system
     doc["binaries"] = {b: dict(sorted(abis.items())) for b, abis in sorted(binaries.items())}
+    # Each hidden dependency's entry says, measured, where it is hidden: per
+    # binary and ABI the archive, the members taken and the exported count.
+    by_id = {e["id"]: e for e in doc["sources"]}
+    for b, abis in sorted(binaries.items()):
+        for abi, info in sorted(abis.items()):
+            for arc, rec in sorted(info.get("prefix", {}).items()):
+                if rec["hidden"]:
+                    entry = by_id.get(rec["source"])
+                    if entry is None:
+                        sys.exit(f"static-system: SOURCES.json has no entry {rec['source']!r} for {arc}")
+                    entry.setdefault("hidden_in", {}).setdefault(b, {})[abi] = {
+                        "archive": arc, "extracted": rec["extracted"], "exported": rec["exported"]}
     json.dump(doc, open(path, "w"), indent=2)
     digest = sha256(path)
     sums = os.path.join(out, "SHA256SUMS")
@@ -216,6 +317,11 @@ def main():
     for b, abis in sorted(binaries.items()):
         print(f"static-system: {b}: NDK {ndk_version}, clang {clang}; exports "
               + ", ".join(f"{abi} {v['exports']}" for abi, v in sorted(abis.items())))
+        hidden = sorted({a for v in abis.values() for a, r in v.get("prefix", {}).items() if r["hidden"]})
+        if hidden:
+            print(f"static-system: {b}: hidden prefix archives {', '.join(hidden)}: exported "
+                  + ", ".join(f"{abi} {sum(r['exported'] for r in v['prefix'].values() if r['hidden'])}"
+                              for abi, v in sorted(abis.items())))
     for e in static_system:
         for b, abis in e["binaries"].items():
             print(f"static-system: {e['id']} {e['version']} ({e['license']}) in {b}: "
