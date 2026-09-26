@@ -304,6 +304,44 @@ released binary, and `debug-symbols-plynic.zip` symbolizes exactly that one.
 
 ## Releases
 
+### v0.41.0-plynic.rc8
+
+rc8 = rc7 + a decoder fallback that ends (prerelease, not pinned by the
+app). FFmpeg (with rc7's Android-only rotation patch), the dependencies, the
+flavor and the helper are unchanged.
+
+- **mpv: plynic-mpv `f7a734caa2` → `c04b0880f0`**: `vd_lavc: don't loop
+  forever when every decoder fails` (`a57685fa5a`) and its README note (a
+  topic of its own, the patch budget's fifth). When a hardware decoder could
+  not be opened, vd_lavc fell back until some decoder opened; if software
+  decoding could not be opened either, it tried software decoding again,
+  forever, on the core thread under the core lock. A file whose video
+  libavcodec rejects at open (HEVC with a broken hvcC; the app's TV path,
+  `vo=mediacodec_embed` with `hwdec=mediacodec`) wedged the player: every
+  client call waited, "Could not open codec." flooded the log (about 30 000
+  a second), and the decoder wrapper never logged its verdict. Now software
+  decoding gets one attempt: `Failed to initialize a decoder for codec
+  'hevc'.` once, `Video: no video`, and the audio plays on. The same loop
+  was in the fallback after a hwdec fails while decoding (the stream now
+  ends there, with `No decoding method left for this stream.`) and is
+  reached from a `hwdec` change and rc7's rotation change. Upstream mpv has
+  the same loops.
+- **`tools/fallback-check`** (new): `hevc_bad_hvcc.mkv` (a 4 s HEVC + AAC
+  clip with its hvcC broken by `mkbad.py`; FFmpeg refuses to open its
+  decoder: "Invalid NAL unit size in extradata.") on `mediacodec_embed` with
+  `hwdec=mediacodec`, `vo=null` with `mediacodec-copy` and with software
+  decoding only, and the unbroken clip; the probe asks the core for
+  `time-pos` once a second without blocking. On the Android 14 TV emulator
+  rc7 is wedged in both hardware cases within a second (114 465 and 117 608
+  "Could not open codec." before the first unanswered request, no verdict);
+  a local arm64 build of this commit passes 4 of 4 (6 failed opens, the
+  verdict once, every request answered, the audio to its end at 3.7 s).
+- **libmpv.so vs rc7** (local arm64 build): the same exports and
+  `DT_NEEDED`; the difference is `vd_lavc.c` and the version stamp.
+- **Checked** on the Android 14 TV emulator, local arm64 build:
+  `tools/fallback-check` 4 of 4, `tools/rotate-check` 9 of 9,
+  `tools/osd-check` (keep-out under both names, 20 of 20 paused switches).
+
 ### v0.41.0-plynic.rc7
 
 rc7 = rc6 + portrait videos upright on the MediaCodec surface VOs
