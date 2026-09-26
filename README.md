@@ -16,7 +16,8 @@ The iOS/macOS counterpart is
 same plynic-mpv commit, same FFmpeg commit, byte-identical
 `buildscripts/patches/ffmpeg/` (its `patches/ffmpeg/`, same keys and sha256
 in both manifests), same dependency versions, and the same tag for a pair
-of builds.
+of builds. Each platform has FFmpeg patches of its own besides:
+`buildscripts/patches/ffmpeg-android/` here, `patches/ffmpeg-darwin/` there.
 
 What differs from upstream:
 
@@ -41,7 +42,11 @@ What differs from upstream:
   - `tls_mbedtls_verify_flags.patch`: a rejected server certificate is logged
     with the reasons (format below);
   - `upstream_http_*.patch`: FFmpeg's own fixes from master, not yet on the
-    8.1 branch (see v0.41.0-plynic.rc1 below).
+    8.1 branch (see v0.41.0-plynic.rc1 below);
+  - Android only, `buildscripts/patches/ffmpeg-android/` (applied after
+    them): `mediacodecdec_rotation.patch`, a `rotation` option for the
+    MediaCodec video decoders, which MediaCodec takes as `KEY_ROTATION` and
+    turns what it renders to a surface by (since rc7, see below).
 - **`--build-id=sha1`** on libmpv.so, so a native crash can be attributed to a
   build and symbolized against the release's `debug-symbols-plynic.zip`.
 - **`mpv-version` says which fork commit it is**: `mpv v0.41.0-plynic-g<first
@@ -150,12 +155,34 @@ Surface changes (`vo=null`, `android-surface-size`, `wid`, `vo`), so a
 rotated video whose track stays selected across the change logs those lines
 once, and the VO that follows shows it rotated as it should; parking the
 track first (`vid=no` ... `vid=auto`) avoids them. Nothing is lost: vo=null
-throws the frames away. MediaCodec surface frames (`vo=mediacodec_embed`,
-`vo=mediacodec_osd`) cannot be rotated in software at all: `autorotate:
-Video rotation with this format not supported` (error), and the picture
-stays as decoded. The render API's software backend (not used on Android)
-draws rotated frames unrotated since rc6. `tools/rotate-check` checks all of
-it on a device.
+throws the frames away. The render API's software backend (not used on
+Android) draws rotated frames unrotated since rc6.
+
+MediaCodec surface frames (`vo=mediacodec_embed`, `vo=mediacodec_osd`)
+cannot be rotated in software at all. Since rc7 MediaCodec rotates them:
+the decoder is configured with the rotation (`KEY_ROTATION`) and every
+buffer it renders carries it as its transform, which the compositor applies.
+The rotation is the stream's plus `video-rotate` (multiples of 90 degrees),
+and a verbose line says so:
+
+```
+vd: Decoder rotates the video by 90 degrees.
+```
+
+What mpv reports stays as it was: `video-params` and `video-out-params`
+have the decoded size and `rotate`, as with `vo=gpu`, so an embedder sizes
+the Surface for the rotated picture (swapping `dw` and `dh` for 90 and 270)
+and MediaCodec scales the turned picture to fill it; the OSD VO draws
+subtitles and the OSD upright into `vo-mediacodec-osd-video-rect`, laid out
+for the rotated picture. Nothing needs to turn the SurfaceView (an Android
+SurfaceView ignores view transforms anyway). MediaCodec takes the rotation
+only when it is configured, so a new `video-rotate` makes a new decoder
+(`vd: Rotation changed, reinitializing the decoder.`), which resumes at the
+next keyframe. rc6 and earlier logged `autorotate: Video rotation with this
+format not supported` (error) and the VO's `Video is flagged as rotated by
+90 degrees, but the video output does not support this.` (warning), and
+showed the picture as decoded: sideways, and stretched into a Surface sized
+for the rotated picture. `tools/rotate-check` checks all of it on a device.
 
 **CA file**: `tls: mbedtls_x509_crt_parse_file for CA cert returned <n>`
 (`error`: `n` < 0, or not a single certificate could be parsed; the same in
@@ -249,7 +276,94 @@ Retention: a release that any published plynic version pinned is never
 deleted, and its source stays available for at least three years after that
 plynic version was last distributed.
 
+## Reproducibility
+
+Every input is pinned (`include/depinfo.sh`: the fork's commit, git
+sources by tag and commit, tarballs by SHA-256, the NDK and meson
+versions), so a tag always builds the same source with the same flags. The
+binaries are byte-for-byte the same with one known exception:
+
+- Two builds on the same host at the same path give byte-identical
+  `libmpv.so` for every ABI (checked on macOS, rc2).
+- Between two CI runs (fresh runners, everything rebuilt, no cache),
+  arm64-v8a, armeabi-v7a and x86 came out byte-identical, **x86_64 did
+  not**. The two runs compared were rc6's pre-run (`workflow_dispatch` on
+  `0c2cab4`) and its tag run (`cb61e32`, which only changes README.md), so
+  different commits of this repository with the same build inputs. The
+  x86_64 libraries differ in one function, HarfBuzz's
+  `AAT::LigatureSubtable<ObsoleteTypes>::driver_context_t::transition`
+  (325 bytes of `.text`), and so in their GNU build-id: NDK r25c's clang
+  14.0.7 does not generate that function deterministically for x86_64.
+
+So an x86_64 `libmpv.so` rebuilt from a tag may differ from the released one
+in that function and its build-id; a comparison of two builds has to allow
+for it (compare the other three ABIs byte for byte, and for x86_64 look at
+what the difference touches). The app pins each ABI by the SHA-256 and
+build-id in the release's `manifest.json`, so what it ships is always the
+released binary, and `debug-symbols-plynic.zip` symbolizes exactly that one.
+
 ## Releases
+
+### v0.41.0-plynic.rc7
+
+rc7 = rc6 + portrait videos upright on the MediaCodec surface VOs
+(prerelease, not pinned by the app). The dependencies, the flavor and the
+helper are unchanged; FFmpeg gets one Android-only patch.
+
+- **mpv: plynic-mpv `4c4e802343` → `f7a734caa2`**: `vo_mediacodec_embed,
+  vo_mediacodec_osd: rotate in MediaCodec` (`5bb084fe55`) and its README
+  note. A video whose file says to turn it by 90 or 270 degrees (a phone's
+  portrait video) played sideways on `vo=mediacodec_embed` and
+  `vo=mediacodec_osd`, stretched into a Surface an app sizes for the
+  rotated picture: MediaCodec renders straight into that Surface, nothing
+  in mpv sees the pixels, and an Android SurfaceView cannot be turned by the
+  app either. Both VOs now declare `VO_CAP_DECODER_ROTATE` (with
+  `VO_CAP_ROTATE90`), and vd_lavc gives the MediaCodec decoder the rotation
+  mpv reports for those frames (the stream's plus `video-rotate`), which
+  MediaCodec applies as `KEY_ROTATION`: every buffer it renders carries it
+  as its transform and the compositor turns it. `video-params` and
+  `video-out-params` report what they did before (the decoded size and
+  `rotate`); see [Log lines for embedders](#log-lines-for-embedders),
+  Rotation. `vo=gpu` (the texture path, with MediaCodec into mpv's own
+  AImageReader or decoding in software) is unchanged and still rotates in
+  the VO.
+- **FFmpeg: `buildscripts/patches/ffmpeg-android/mediacodecdec_rotation.patch`**
+  (new, Android only): a `rotation` option for FFmpeg's MediaCodec video
+  decoders (0, 90, 180, 270), set as `rotation-degrees` in the MediaFormat
+  they configure; FFmpeg builds that MediaFormat itself and had no way for a
+  caller to set it. `patch.sh` applies `patches/<dep>-android/` after
+  `patches/<dep>/`; SOURCES.json lists it with FFmpeg's patches, the patch
+  archive and `manifest.json`'s `patches` have it as
+  `patches/ffmpeg-android/mediacodecdec_rotation.patch`. The shared
+  `patches/ffmpeg/` is unchanged and still byte-identical with
+  plynic-libmpv-darwin's. A consumer that expects every Android patch under
+  `patches/ffmpeg/` has to allow the new directory.
+- **libmpv.so vs rc6** (local arm64 build against rc6's release): the same
+  9033 exports and `DT_NEEDED`; +2 KB (vd_lavc, the decoder option) and the
+  version stamp (`-gf7a734caa`).
+- **`tools/rotate-check`** checks it: the embed case reads the buffer
+  transform MediaCodec gives each frame (`Image.getTransform()`, T4 for 90
+  degrees clockwise) while `video-rotate` goes 90, 180, 270, 0 (a new
+  decoder each time), `embed-meta` and `osd` play a VP9 file whose own
+  rotation is 270 degrees (new `rot_vp9_meta90.webm`), and `gpu-mc` (new)
+  checks that the texture path with MediaCodec decoding still turns the
+  picture once. On the Android 14 TV emulator a local arm64 build of this
+  commit passes 9 of 9; rc6 fails `embed`, `embed-meta` and `osd` (T0,
+  "Video rotation with this format not supported").
+- **Checked in the app** (a dev build with the local arm64 engine, Android
+  14 TV emulator, VP9 in MKV and MP4 with a display matrix of 90 and 270
+  degrees and a landscape control, with an ASS track): on `mediacodec_osd`
+  and `mediacodec_embed` the picture is upright and pillarboxed
+  (SurfaceFlinger: the video layer's `bufferTransform` ROT_90 / ROT_270,
+  display frame 608x1080 in the middle; the screen capture shows the
+  quadrants upright), the OSD VO's subtitles upright at the top and bottom
+  of the portrait picture, the landscape control unchanged (transform 0,
+  full screen); switching between the two VOs mid-file keeps it upright.
+  `tools/osd-check` (keep-out under both names, 20 of 20 paused switches)
+  passes as on rc6.
+- **README**: [Reproducibility](#reproducibility) (new): what "the same
+  engine" means across builds, and the x86_64 HarfBuzz function that NDK
+  r25c's clang does not generate deterministically.
 
 ### v0.41.0-plynic.rc6
 
