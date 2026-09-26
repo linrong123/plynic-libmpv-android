@@ -25,10 +25,25 @@
 #               picture right afterwards
 #   trackfirst  the same change in the order that parks the video track
 #               first (vid=no ... vid=auto): no rotation filter asked for
-#   embed       vo=mediacodec_embed, hwdec=mediacodec, rot_vp9.webm with
-#               video-rotate=90: MediaCodec surface frames cannot be rotated
-#               in software at all ("Video rotation with this format not
-#               supported"), so a `rotate` filter would not change anything
+#   embed       vo=mediacodec_embed, hwdec=mediacodec on rot_vp9.webm, with
+#               video-rotate 90, then 180, 270, 0 while playing: MediaCodec
+#               renders the frames turned (rc7: the VO has
+#               VO_CAP_DECODER_ROTATE, vd_lavc sets the FFmpeg decoder's
+#               "rotation", i.e. KEY_ROTATION, and a new video-rotate makes a
+#               new decoder). What the harness sees is the buffer transform
+#               each frame comes with (T4 = 90 degrees clockwise, T3 180, T7
+#               270, T0 none), which is what the compositor turns the buffer
+#               by; no rotation filter is asked for. (rc6 and earlier: T0
+#               throughout and "Video rotation with this format not
+#               supported": the frames cannot be rotated in software at all.)
+#   embed-meta  the same VO on rot_vp9_meta90.webm, the rotation in the file
+#               (270 clockwise, T7), then video-rotate=90 on top of it (T0)
+#   osd         vo=mediacodec_osd (without an OSD surface) on
+#               rot_vp9_meta90.webm: T7, as embed
+#   gpu-mc      the texture path with MediaCodec decoding (vo=gpu,
+#               hwdec=mediacodec: MediaCodec into mpv's own AImageReader) on
+#               rot_vp9_meta90.webm, then video-rotate=90: vo=gpu rotates,
+#               the decoder must not (read back: GWRB, then RGBW)
 #
 # Output in out/<label>/, one RotateProbe log per case, judged by judge.py.
 #
@@ -42,6 +57,8 @@
 #     -fflags +bitexact rot_meta90.mp4
 #   ffmpeg -f lavfi -i "$q" -c:v libvpx-vp9 -b:v 0 -crf 63 -g 10 -deadline good \
 #     -cpu-used 8 -an -map_metadata -1 -fflags +bitexact -flags +bitexact rot_vp9.webm
+#   ffmpeg -display_rotation 90 -i rot_vp9.webm -c copy -map_metadata -1 \
+#     -fflags +bitexact rot_vp9_meta90.webm
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 serial=$1 lib=$2 label=$3
@@ -52,7 +69,8 @@ D=/data/local/tmp/rotate-check
 adb shell "rm -rf $D && mkdir -p $D/lib" && \
 adb push "$lib" $D/lib/libmpv.so >/dev/null && \
 adb push "$here/out/$abi/librotprobe.so" "$here/out/$abi/classes.dex" \
-  "$here/rot.mp4" "$here/rot_meta90.mp4" "$here/rot_vp9.webm" $D/ >/dev/null || exit 2
+  "$here/rot.mp4" "$here/rot_meta90.mp4" "$here/rot_vp9.webm" "$here/rot_vp9_meta90.webm" \
+  $D/ >/dev/null || exit 2
 res=$here/out/$label
 mkdir -p "$res"
 
@@ -81,6 +99,17 @@ probe legacy fatal 640x640 rot.mp4 $gpu video-rotate=90 +wait=1.5 +mark=BRWG \
 probe trackfirst none 640x640 rot.mp4 $gpu video-rotate=90 +wait=1.5 +mark=BRWG \
   +set=vid=no +set=vo=null +wait=0.3 +set=android-surface-size=640x640 +set=wid=@0 \
   +set=vo=gpu +set=vid=auto +wait=1.5 +mark=BRWG
-probe embed unsupported 640x640:private rot_vp9.webm vo=mediacodec_embed hwdec=mediacodec \
-  wid=@0 video-rotate=90 +wait=2 +get=hwdec-current +get=video-params/rotate
+mc="hwdec=mediacodec wid=@0"
+probe embed none 640x640:private rot_vp9.webm vo=mediacodec_embed $mc video-rotate=90 +wait=2 \
+  +get=hwdec-current +get=video-params/rotate +mark=T4 +set=video-rotate=180 +wait=2 +mark=T3 \
+  +set=video-rotate=270 +wait=2 +mark=T7 +set=video-rotate=0 +wait=2 +mark=T0 \
+  +get=video-params/rotate +get=current-vo +get=mpv-version
+probe embed-meta none 640x640:private rot_vp9_meta90.webm vo=mediacodec_embed $mc +wait=2 \
+  +get=video-params/rotate +get=video-out-params/rotate +mark=T7 +set=video-rotate=90 +wait=2 \
+  +get=video-params/rotate +mark=T0
+probe osd none 640x640:private rot_vp9_meta90.webm vo=mediacodec_osd $mc +wait=2 \
+  +get=current-vo +get=hwdec-current +get=video-params/rotate +mark=T7
+probe gpu-mc none 640x640 rot_vp9_meta90.webm vo=gpu gpu-context=android hwdec=mediacodec wid=@0 \
+  android-surface-size=640x640 +wait=2 +get=hwdec-current +get=video-params/rotate +mark=GWRB \
+  +set=video-rotate=90 +wait=2 +get=hwdec-current +mark=RGBW
 exit $fail

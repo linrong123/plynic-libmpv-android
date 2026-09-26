@@ -8,10 +8,12 @@
                        allocate"): the VO in the chain cannot rotate (vo=null)
           unsupported  the frames cannot be rotated in software at all
                        ("Video rotation with this format not supported":
-                       MediaCodec surface frames), no filter asked for
+                       MediaCodec surface frames on rc6 and earlier), no
+                       filter asked for
 
 Every "MARK <layout>" has to follow a frame of that layout (the last VIDEO
-line before it), and the run has to end with rc 0.
+line before it), and the run has to end with rc 0. For the MediaCodec VOs
+the layout is the buffer transform, T<n>.
 """
 import re
 import sys

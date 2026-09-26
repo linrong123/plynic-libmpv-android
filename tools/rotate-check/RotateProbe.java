@@ -9,8 +9,12 @@
 //
 //   RotateProbe <libmpv.so> <librotprobe.so> <WxH>[:private] <url> [opt=value | +action ...]
 //
-// ":private": an ImageReader MediaCodec can decode into (vo=mediacodec_embed);
-// its frames are counted, not read.
+// ":private": an ImageReader MediaCodec can decode into (vo=mediacodec_embed,
+// vo=mediacodec_osd); its frames are not read, but the buffer transform each
+// one comes with is ("layout=T<n>": HAL_TRANSFORM_*, 0 none, 4 90 degrees
+// clockwise, 3 180, 7 270; what MediaCodec sets from KEY_ROTATION, and what
+// the compositor turns the buffer by). Image.getTransform() is hidden API,
+// which app_process may call.
 //
 // "@0" in an option or +set value stands for the JNI global ref of the
 // Surface. The actions (rotprobe.c) run after FILE_LOADED.
@@ -20,6 +24,7 @@ import android.hardware.HardwareBuffer;
 import android.media.Image;
 import android.media.ImageReader;
 import android.view.Surface;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
@@ -51,14 +56,28 @@ public class RotateProbe {
                         frames++;
                         if (im.getFormat() == PixelFormat.RGBX_8888)
                             inspect(im);
-                        else if (frames == 1)
-                            System.out.printf("VIDEO first frame at %.3f (format 0x%x, not read)%n", now(), im.getFormat());
+                        else
+                            transform(im);
                         im.close();
                     }
                 } catch (IllegalStateException e) {
                     System.out.println("VIDEO acquire: " + e);
                 }
                 try { Thread.sleep(5); } catch (InterruptedException e) { return; }
+            }
+        }
+        void transform(Image im) {
+            String state;
+            try {
+                Method m = Image.class.getMethod("getTransform");
+                state = "layout=T" + m.invoke(im);
+            } catch (Exception e) {
+                state = "layout=? (" + e + ")";
+            }
+            state += String.format(" format=0x%x", im.getFormat());
+            if (!state.equals(last)) {
+                last = state;
+                System.out.printf("VIDEO frame %d at %.3f %dx%d %s%n", frames, now(), im.getWidth(), im.getHeight(), state);
             }
         }
         void inspect(Image im) {

@@ -7,7 +7,8 @@
 //   +mark=<layout>       "MARK <layout> at <t>": judge.py expects the last
 //                        frame before it to have that layout
 // Prints mpv's warnings, errors and fatal messages, and every message about
-// rotation (the autorotate filter's "Inserting rotation filter." is info).
+// rotation (the autorotate filter's "Inserting rotation filter." is info,
+// vd_lavc's "Decoder rotates the video by <n> degrees." verbose).
 // rc: 0 ok, 1 end-file error, 2 init failed, 3 not loaded
 #include <jni.h>
 #include <stdint.h>
@@ -80,7 +81,7 @@ JNIEXPORT jint JNICALL Java_RotateProbe_run(JNIEnv *env, jclass cls, jobject sur
         int r = mpv_set_option_string(c, k, v);
         printf("opt %s=%s -> %s\n", k, v, mpv_error_string(r));
     }
-    mpv_request_log_messages(c, "info");
+    mpv_request_log_messages(c, "v");   // "Decoder rotates the video by ..."
     if (mpv_initialize(c) < 0) {
         printf("RESULT init-failed\n");
         return 2;
