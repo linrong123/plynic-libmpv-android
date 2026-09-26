@@ -52,7 +52,7 @@ v_libplacebo_commit=cee9b076f2c63104ccfd497fa79c39a867293ec4
 # v1.1.11-plynic.* releases). Pin the fork's commit, not the branch, so a
 # rebuilt tag builds the same engine source (byte-identical binaries except
 # for one HarfBuzz function on x86_64: README, Reproducibility).
-v_mpv=f7a734caa2bfdd75b016cb53a8d744a57485af52
+v_mpv=c04b0880f00164b5f5985ecd915d4a94b330061a
 v_mpv_repo=https://github.com/linrong123/plynic-mpv.git
 # media-kit's Android helper: the jar's other .so file (libmediakitandroidhelper.so)
 # comes from its APK
