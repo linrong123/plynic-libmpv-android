@@ -20,6 +20,7 @@
 #                                commits there)
 #   patches-<tag>.tar.xz         buildscripts/patches: applied to the trees
 #                                above by patch.sh, in file name order
+#                                (patches/<dep>-android/ after patches/<dep>/)
 #   plynic-libmpv-android-<tag>.tar.xz
 #                                this repository at the commit being built
 #                                (build scripts, flavors, patches)
@@ -169,7 +170,7 @@ echo "plynic-libmpv-android-$tag.tar.xz"
 
 # SOURCES.json + SHA256SUMS
 python3 - "$out" "$tag" <<PY
-import hashlib, json, os, sys
+import hashlib, json, os, re, sys
 out, tag = sys.argv[1:3]
 def sha(p):
     h = hashlib.sha256()
@@ -181,8 +182,11 @@ patches = []
 for root, _, files in os.walk("patches"):
     for f in sorted(files):
         p = os.path.join(root, f)
-        patches.append({"file": p, "applies_to": p.split(os.sep)[1], "sha256": sha(p)})
-patches.sort(key=lambda p: p["file"])
+        # patches/<dep>-android/: Android only, applied after patches/<dep>/
+        dep = re.sub(r"-android$", "", p.split(os.sep)[1])
+        patches.append({"file": p, "applies_to": dep, "sha256": sha(p)})
+# in the order patch.sh applies them: patches/<dep>/ before patches/<dep>-android/
+patches.sort(key=lambda p: (p["file"].split(os.sep)[1].endswith("-android"), p["file"]))
 def ffpatches(dep):
     return [p["file"] for p in patches if p["applies_to"] == dep]
 E = []
@@ -236,8 +240,9 @@ add("zlib-$v_zlib.tar.xz", "zlib", "$v_zlib", "Zlib",
          "hidden in libmpv.so: \"hidden_in\" has, per ABI, the members linked and how many of its definitions "
          "libmpv.so exports (0; include/static-system.py fails the build otherwise)")
 add(f"patches-{tag}.tar.xz", "patches", tag, "LGPL-3.0-or-later", "",
-    note="buildscripts/patches, applied by patch.sh in file name order; under the terms of the FFmpeg "
-         "code they change. upstream_*.patch are FFmpeg's own commits (git format-patch), backported")
+    note="buildscripts/patches, applied by patch.sh in file name order, ffmpeg/ then ffmpeg-android/ "
+         "(Android only); under the terms of the FFmpeg code they change. upstream_*.patch are FFmpeg's "
+         "own commits (git format-patch), backported")
 add(f"plynic-libmpv-android-{tag}.tar.xz", "plynic-libmpv-android", tag, "MIT",
     "https://github.com/linrong123/plynic-libmpv-android", note="the build scripts (git archive)")
 for e in E:

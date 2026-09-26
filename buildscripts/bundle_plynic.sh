@@ -136,7 +136,8 @@ out = {"flavor": "plynic", "tag": os.environ.get("PLYNIC_TAG", ""),
                        "freetype": "$v_freetype_commit", "fribidi": "$v_fribidi_commit",
                        "libxml2": "$v_libxml2_commit", "dav1d": "$v_dav1d_commit"},
        # every patch applied to a dependency, by sha256: the Darwin build must
-       # carry byte-identical copies of the shared FFmpeg TLS patches
+       # carry byte-identical copies of the shared ones (patches/ffmpeg/);
+       # patches/ffmpeg-android/ is Android's own
        "patches": {p["file"]: p["sha256"] for p in sources["patches"]},
        "sources": [{k: e[k] for k in ("file", "id", "version", "license", "sha256", "size")}
                    for e in sources["sources"]],
